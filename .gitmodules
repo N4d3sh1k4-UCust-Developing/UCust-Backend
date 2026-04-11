@@ -1,0 +1,21 @@
+[submodule "user-service"]
+	path = user-service
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-user-service.git
+[submodule "netflix-eureka"]
+	path = netflix-eureka
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-eureka-service.git
+[submodule "api-gateway"]
+	path = api-gateway
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-api_gateway-service.git
+[submodule "business-service"]
+	path = business-service
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-business-service.git
+[submodule "notification-service"]
+	path = notification-service
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-notification-service.git
+[submodule "security-service"]
+	path = security-service
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-security-service.git
+[submodule "common"]
+	path = common
+	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-common-library.git
