@@ -48,6 +48,9 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        
       - name: Tailscale Connect
         uses: tailscale/github-action@v2
         with:
@@ -61,9 +64,13 @@ jobs:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          # Копируем чертеж (compose) и начальный скрипт базы (sql)
-          source: "docker-compose.yml,init.sql" 
-          target: "~/app"
+          script: |
+            cd ~/app
+            # Логинимся, чтобы Docker мог стянуть приватные образы
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
           
       - name: SSH and Update Containers
         uses: appleboy/ssh-action@master
