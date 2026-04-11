@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-and-push:
-    runs-with: ubuntu-latest
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         # Перечисли все свои сервисы здесь
@@ -22,6 +22,12 @@ jobs:
         with:
           submodules: recursive # Скачивает код всех сервисов и common
 
+      - name: Lowercase Registry Owner
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
+        env:
+          OWNER: '${{ github.repository_owner }}'
+
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -35,11 +41,11 @@ jobs:
           context: . # Контекст — корень, чтобы Docker видел папку common
           file: ./${{ matrix.service }}/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:latest
+          tags: ghcr.io/${{ env.OWNER_LC }}/${{ matrix.service }}:latest
 
   deploy:
     needs: build-and-push
-    runs-with: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Tailscale Connect
         uses: tailscale/github-action@v2
