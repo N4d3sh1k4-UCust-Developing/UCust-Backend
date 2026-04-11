@@ -8,6 +8,7 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         # Перечисли все свои сервисы здесь
         service: [api-gateway, security-service, user-service, business-service, netflix-eureka, notification-service]
