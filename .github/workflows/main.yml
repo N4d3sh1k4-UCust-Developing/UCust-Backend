@@ -1,0 +1,62 @@
+name: Full Stack Deployment
+
+on:
+  push:
+    branches: [ master, main ]
+
+jobs:
+  build-and-push:
+    runs-with: ubuntu-latest
+    strategy:
+      matrix:
+        # Перечисли все свои сервисы здесь
+        service: [api-gateway, security-service, user-service, business-service, netflix-eureka, notification-service]
+    
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # Скачивает код всех сервисов и common
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Контекст — корень, чтобы Docker видел папку common
+          file: ./${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-with: ubuntu-latest
+    steps:
+      - name: Tailscale Connect
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: SSH and Update Containers
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_TAILSCALE_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd ~/app
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
