@@ -64,13 +64,8 @@ jobs:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            cd ~/app
-            # Логинимся, чтобы Docker мог стянуть приватные образы
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker image prune -f
+          source: "docker-compose.yml,init.sql"
+          target: "~/app"
           
       - name: SSH and Update Containers
         uses: appleboy/ssh-action@master
