@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-and-push:
-    runs-with: ubuntu-latest
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         # Перечисли все свои сервисы здесь
@@ -39,7 +39,7 @@ jobs:
 
   deploy:
     needs: build-and-push
-    runs-with: ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Tailscale Connect
         uses: tailscale/github-action@v2
