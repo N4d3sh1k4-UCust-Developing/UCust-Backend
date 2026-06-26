@@ -1,0 +1,18 @@
+{
+  "vhosts": [
+    { "name": "universal-host" }
+  ],
+  "users": [
+    {"name": "rmuser","password": "rmpassword","tags": "administrator"},
+    { "name": "service-user", "password": "servicepassword", "tags": "" }
+  ],
+  "permissions": [
+    {
+      "user": "service-user",
+      "vhost": "universal-host",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+   ]
+}

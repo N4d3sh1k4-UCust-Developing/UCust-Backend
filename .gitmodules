@@ -1,9 +1,6 @@
 [submodule "user-service"]
 	path = user-service
 	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-user-service.git
-[submodule "netflix-eureka"]
-	path = netflix-eureka
-	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-eureka-service.git
 [submodule "api-gateway"]
 	path = api-gateway
 	url = https://github.com/N4d3sh1k4-UCust-Developing/backend-api_gateway-service.git

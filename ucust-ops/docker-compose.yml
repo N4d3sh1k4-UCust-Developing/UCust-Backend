@@ -1,0 +1,75 @@
+version: '3.8'
+
+name: ucust-ops
+
+networks:
+  ucust-net:
+    driver: bridge
+
+services:
+  postgres-db:
+    image: postgres:16
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ETA_DBUser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ux$kgfmpJysjHBMNhXX!jFnH9@YQp!eW}
+    ports:
+      - "${POSTGRES_PORT:-5440}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks:
+      - ucust-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ETA_DBUser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rmuser}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-rmpassword}
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5680}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15673}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+    restart: unless-stopped
+    networks:
+      - ucust-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-password123}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_API_PORT:-9020}:9000"
+      - "${MINIO_CONSOLE_PORT:-9021}:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    networks:
+      - ucust-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  minio_data:

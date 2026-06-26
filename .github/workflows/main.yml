@@ -10,9 +10,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Перечисли все свои сервисы здесь
-        service: [api-gateway, security-service, user-service, business-service, netflix-eureka, notification-service]
-    
+        service: [api-gateway, security-service, user-service, business-service, notification-service]
+
     permissions:
       contents: read
       packages: write
@@ -21,7 +20,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive # Скачивает код всех сервисов и common
+          submodules: recursive
 
       - name: Lowercase Registry Owner
         run: |
@@ -39,7 +38,7 @@ jobs:
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
-          context: . # Контекст — корень, чтобы Docker видел папку common
+          context: .
           file: ./${{ matrix.service }}/Dockerfile
           push: true
           tags: ghcr.io/${{ env.OWNER_LC }}/${{ matrix.service }}:latest
@@ -50,7 +49,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        
+
       - name: Tailscale Connect
         uses: tailscale/github-action@v2
         with:
@@ -58,24 +57,29 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
-      - name: Copy infrastructure files to server
+      - name: Copy docker-compose to server
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "docker-compose.yml,init.sql"
-          target: "~/app"
-          
+          source: "docker-compose.yml"
+          target: "~/reshala-project"
+
       - name: SSH and Update Containers
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: DB_PASSWORD, JWT_SECRET_ACCESS, SERVER_TAILSCALE_IP
           script: |
-            cd ~/app
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            cd ~/reshala-project
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET_ACCESS: ${{ secrets.JWT_SECRET_ACCESS }}
+          SERVER_TAILSCALE_IP: ${{ secrets.SERVER_TAILSCALE_IP }}

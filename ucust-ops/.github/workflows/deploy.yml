@@ -1,0 +1,55 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+      - "docker-compose.yml"
+      - "postgres/**"
+      - "rabbitmq/**"
+      - "scripts/**"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Tailscale Connect
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Copy configs to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_TAILSCALE_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "docker-compose.yml,postgres/init.sql,rabbitmq/definitions.json"
+          target: "~/reshala-project/ucust-ops"
+
+      - name: SSH and Update Infrastructure
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_TAILSCALE_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          envs: POSTGRES_PASSWORD, RABBITMQ_PASS, MINIO_ROOT_PASSWORD
+          script: |
+            cd ~/reshala-project/ucust-ops
+
+            # Create shared network if not exists
+            docker network inspect ucust-net >/dev/null 2>&1 || docker network create ucust-net
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          RABBITMQ_PASS: ${{ secrets.RABBITMQ_PASS }}
+          MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}

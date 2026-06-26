@@ -1,0 +1,124 @@
+name: ucust-local
+
+services:
+  postgres-db:
+    image: postgres:16
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ETA_DBUser
+      POSTGRES_PASSWORD: ux$kgfmpJysjHBMNhXX!jFnH9@YQp!eW
+    ports:
+      - "5440:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./ucust-ops/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ETA_DBUser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: rmuser
+      RABBITMQ_DEFAULT_PASS: rmpassword
+    ports:
+      - "5680:5672"
+      - "15673:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    command: server /data --console-address ":9001"
+    ports:
+      - "9020:9000"
+      - "9021:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/api-gateway:latest
+    container_name: api-gateway
+    ports:
+      - "8100:8100"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx256m -Xms128m
+      - JWT_SECRET_ACCESS=dGhpcy1pcy1hLWxvY2FsLWRldi1zZWNsLyZXQtYmFzZsLTY0LWtleQ==
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  security-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/security-service:latest
+    container_name: security-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx384m -Xms256m
+      - DB_PASSWORD=ux$kgfmpJysjHBMNhXX!jFnH9@YQp!eW
+      - JWT_SECRET_ACCESS=dGhpcy1pcy1hLWxvY2FsLWRldi1zZWNsLyZXQtYmFzZsLTY0LWtleQ==
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    restart: unless-stopped
+
+  user-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/user-service:latest
+    container_name: user-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - DB_PASSWORD=ux$kgfmpJysjHBMNhXX!jFnH9@YQp!eW
+      - SERVER_TAILSCALE_IP=127.0.0.1
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    restart: unless-stopped
+
+  business-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/business-service:latest
+    container_name: business-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - DB_PASSWORD=ux$kgfmpJysjHBMNhXX!jFnH9@YQp!eW
+      - SERVER_TAILSCALE_IP=127.0.0.1
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    restart: unless-stopped
+
+  notification-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/notification-service:latest
+    container_name: notification-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx512m -Xms256m
+    depends_on:
+      rabbitmq:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  minio_data:
