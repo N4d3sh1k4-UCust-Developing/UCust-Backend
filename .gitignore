@@ -4,3 +4,7 @@
 *.iml
 out/
 .DS_Store
+
+# Local environment (secrets)
+.env
+*.env
