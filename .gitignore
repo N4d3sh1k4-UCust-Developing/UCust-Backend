@@ -8,3 +8,6 @@ out/
 # Local environment (secrets)
 .env
 *.env
+
+# Ops infrastructure (deployed independently)
+ucust-ops/
