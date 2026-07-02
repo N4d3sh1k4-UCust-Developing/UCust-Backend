@@ -7,7 +7,7 @@ networks:
 services:
   api-gateway:
     image: ghcr.io/n4d3sh1k4-ucust-developing/api-gateway:latest
-    container_name: api-gateway
+    container_name: api-gateway-ucust
     ports:
       - "8100:8100"
     environment:
@@ -24,7 +24,7 @@ services:
 
   security-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/security-service:latest
-    container_name: security-service
+    container_name: security-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx384m -Xms256m
@@ -44,7 +44,7 @@ services:
 
   user-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/user-service:latest
-    container_name: user-service
+    container_name: user-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx512m -Xms256m
@@ -60,7 +60,7 @@ services:
 
   business-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/business-service:latest
-    container_name: business-service
+    container_name: business-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx512m -Xms256m
@@ -76,7 +76,7 @@ services:
 
   notification-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/notification-service:latest
-    container_name: notification-service
+    container_name: notification-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx512m -Xms256m
