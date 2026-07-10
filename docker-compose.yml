@@ -14,6 +14,10 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx256m -Xms128m
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
+      - PGADMIN_URI=http://pgadmin-ucust:9022
+      - RABBITMQ_ADMIN_URI=http://rabbitmq-ucust:15673
+      - MINIO_ADMIN_URI=http://minio-ucust:9021
+      - SERVICES_DOZZLE_URI=http://dozzle-ucust:8081
     networks:
       - ucust-net
     restart: unless-stopped
@@ -80,6 +84,8 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx512m -Xms256m
+      - SUPPORT_EMAIL=${SUPPORT_EMAIL}
+      - BACKEND_URL=${BACKEND_URL}
     networks:
       - ucust-net
     restart: unless-stopped
