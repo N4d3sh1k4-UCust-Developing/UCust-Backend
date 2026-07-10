@@ -11,3 +11,4 @@ out/
 
 # Ops infrastructure (deployed independently)
 ucust-ops/
+ucust-admin-spa/
