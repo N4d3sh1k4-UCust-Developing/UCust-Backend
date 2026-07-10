@@ -98,5 +98,5 @@ jobs:
           YANDEX_CLIENT_SECRET: ${{ secrets.YANDEX_CLIENT_SECRET }}
           VK_CLIENT_ID: ${{ secrets.VK_CLIENT_ID }}
           VK_CLIENT_SECRET: ${{ secrets.VK_CLIENT_SECRET }}
-          SUPPORT_EMAIL: ${{SUPPORT_EMAIL}}
-          BACKEND_URL: ${{BACKEND_URL}}
+          SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
