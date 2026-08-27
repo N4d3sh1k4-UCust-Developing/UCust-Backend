@@ -20,6 +20,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
+          token: ${{ secrets.SUBMODULES_PAT }}
           submodules: recursive
 
       - name: Lowercase Registry Owner
