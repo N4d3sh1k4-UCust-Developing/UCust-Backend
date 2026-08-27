@@ -1,0 +1,126 @@
+name: ucust-local
+
+services:
+  postgres-db:
+    image: postgres:16
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ETA_DBUser
+      POSTGRES_PASSWORD: devpassword123
+    ports:
+      - "5440:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./ops/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ETA_DBUser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-service-user}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-servicepassword}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: >-
+        -rabbitmq_management load_definitions "/etc/rabbitmq/definitions.json"
+        -rabbitmq_server deprecated_features_permitted [transient_nonexcl_queues]
+        -rabbitmq_management path_prefix "/admin/rabbit"
+    ports:
+      - "5680:5672"
+      - "15673:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./ops/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:8100/admin/minio/
+    command: server /data --console-address ":9001"
+    ports:
+      - "9020:9000"
+      - "9021:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./ops/minio/policies:/policies:ro
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 admin password123;
+      mc mb local/user-service --ignore-existing;
+      mc mb local/business-service --ignore-existing;
+      mc mb local/generative-orchestration --ignore-existing;
+      mc admin policy remove local business-service-rw 2>/dev/null;
+      mc admin policy remove local generative-orchestration-rw 2>/dev/null;
+      mc admin policy create local business-service-rw /policies/business-service-rw.json;
+      mc admin policy create local generative-orchestration-rw /policies/generative-orchestration-rw.json;
+      mc admin user add local business-service-user bus-strong-pass;
+      mc admin user add local generative-orchestration-user gen-strong-pass;
+      mc admin policy attach local business-service-rw --user business-service-user;
+      mc admin policy attach local generative-orchestration-rw --user generative-orchestration-user;
+      mc anonymous set download local/user-service;
+      mc anonymous set download local/business-service;
+      mc anonymous set download local/generative-orchestration;
+      exit 0;
+      "
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "8080:8080"
+    environment:
+      - DOZZLE_TAILSIZE=1000
+      - DOZZLE_BASE=/admin/monitoring
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@ucust.ru
+      PGADMIN_DEFAULT_PASSWORD: devpassword123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'False'
+      PGADMIN_CONFIG_PROXY_PATH: "'/admin/pgadmin'"
+      PGADMIN_CONFIG_WTF_CSRF_ENABLED: "False"
+    ports:
+      - "9022:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./ops/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  minio_data:
+  pgadmin_data:
