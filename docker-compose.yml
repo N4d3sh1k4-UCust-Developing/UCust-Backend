@@ -98,6 +98,10 @@ services:
       - JAVA_OPTS=-Xmx512m -Xms256m
       - SUPPORT_EMAIL=${SUPPORT_EMAIL}
       - BACKEND_URL=${BACKEND_URL}
+      - MAIL_HOST=${MAIL_HOST:-sandbox.smtp.mailtrap.io}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USERNAME=${MAIL_USERNAME:-a9f3052b45461a}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-ae4e25c063dcb8}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -106,3 +110,42 @@ services:
       resources:
         limits:
           memory: 412M
+
+  billing-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/billing-service:latest
+    container_name: billing-service-ucust
+    ports:
+      - "8106:8106"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - DB_PASSWORD=${DB_PASSWORD}
+      - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
+    networks:
+      - ucust-net
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  generative-orchestration-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/generative-orchestration-service:latest
+    container_name: generative-orchestration-service-ucust
+    ports:
+      - "8107:8107"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      - DB_PASSWORD=${DB_PASSWORD}
+      - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
+      - AI_SERVICE_URI=${AI_SERVICE_URI}
+    networks:
+      - ucust-net
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512M
