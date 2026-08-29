@@ -84,7 +84,7 @@ jobs:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: DB_PASSWORD, JWT_SECRET_ACCESS, SERVER_TAILSCALE_IP, YANDEX_CLIENT_ID, YANDEX_CLIENT_SECRET, VK_CLIENT_ID, VK_CLIENT_SECRET, SUPPORT_EMAIL, BACKEND_URL, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD, AI_SERVICE_URI, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD
+          envs: DB_PASSWORD, JWT_SECRET_ACCESS, SERVER_TAILSCALE_IP, YANDEX_CLIENT_ID, YANDEX_CLIENT_SECRET, VK_CLIENT_ID, VK_CLIENT_SECRET, SUPPORT_EMAIL, BACKEND_URL, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD, AI_SERVICE_URI, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_SSL
           script: |
             cd ~/projects/ucust
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -108,3 +108,4 @@ jobs:
           MAIL_PORT: ${{ secrets.MAIL_PORT }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_SSL: ${{ secrets.MAIL_SSL }}

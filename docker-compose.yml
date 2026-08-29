@@ -102,6 +102,7 @@ services:
       - MAIL_PORT=${MAIL_PORT:-587}
       - MAIL_USERNAME=${MAIL_USERNAME:-a9f3052b45461a}
       - MAIL_PASSWORD=${MAIL_PASSWORD:-ae4e25c063dcb8}
+      - MAIL_SSL=${MAIL_SSL:-false}
     networks:
       - ucust-net
     restart: unless-stopped
