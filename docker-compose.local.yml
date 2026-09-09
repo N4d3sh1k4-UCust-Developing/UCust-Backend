@@ -75,12 +75,16 @@ services:
       mc mb local/generative-orchestration --ignore-existing;
       mc admin policy remove local business-service-rw 2>/dev/null;
       mc admin policy remove local generative-orchestration-rw 2>/dev/null;
+      mc admin policy remove local user-service-rw 2>/dev/null;
       mc admin policy create local business-service-rw /policies/business-service-rw.json;
       mc admin policy create local generative-orchestration-rw /policies/generative-orchestration-rw.json;
+      mc admin policy create local user-service-rw /policies/user-service-rw.json;
       mc admin user add local business-service-user bus-strong-pass;
       mc admin user add local generative-orchestration-user gen-strong-pass;
+      mc admin user add local user-service-user usr-strong-pass;
       mc admin policy attach local business-service-rw --user business-service-user;
       mc admin policy attach local generative-orchestration-rw --user generative-orchestration-user;
+      mc admin policy attach local user-service-rw --user user-service-user;
       mc anonymous set download local/user-service;
       mc anonymous set download local/business-service;
       mc anonymous set download local/generative-orchestration;

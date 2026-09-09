@@ -23,6 +23,7 @@ services:
       - PGADMIN_URI=http://pgadmin-ucust:80
       - RABBITMQ_ADMIN_URI=http://rabbitmq-ucust:15672
       - MINIO_ADMIN_URI=http://minio-ucust:9001
+      - MINIO_S3_URI=http://minio:9000
       - SERVICES_DOZZLE_URI=http://dozzle-ucust:8080
     networks:
       - ucust-net
@@ -36,9 +37,9 @@ services:
   security-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/security-service:latest
     container_name: security-service-ucust
-    environment:
-      - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx384m -Xms256m
+environment:
+- SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx512m -Xms256m
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - YANDEX_CLIENT_ID=${YANDEX_CLIENT_ID}
@@ -64,6 +65,8 @@ services:
       - JAVA_OPTS=-Xmx512m -Xms256m
       - DB_PASSWORD=${DB_PASSWORD}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
+      - MINIO_ACCESS_KEY=${USER_MINIO_ACCESS_KEY:-admin}
+      - MINIO_SECRET_KEY=${USER_MINIO_SECRET_KEY:-password123}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -97,7 +100,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx512m -Xms256m
       - SUPPORT_EMAIL=${SUPPORT_EMAIL}
-      - BACKEND_URL=${BACKEND_URL}
+      - FRONTEND_URL=${FRONTEND_URL}
       - MAIL_HOST=${MAIL_HOST:-sandbox.smtp.mailtrap.io}
       - MAIL_PORT=${MAIL_PORT:-587}
       - MAIL_USERNAME=${MAIL_USERNAME:-a9f3052b45461a}
@@ -123,6 +126,7 @@ services:
       - JAVA_OPTS=-Xmx512m -Xms256m
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
+      - QUOTA_FREE_UNLIMITED=${QUOTA_FREE_UNLIMITED:-false}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -143,6 +147,12 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - AI_SERVICE_URI=${AI_SERVICE_URI}
+      - AI_ORCHESTRATOR_ENDPOINT=${AI_ORCHESTRATOR_ENDPOINT}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_PUBLIC_BASE_URL=${MINIO_PUBLIC_BASE_URL}
     networks:
       - ucust-net
     restart: unless-stopped

@@ -1,0 +1,721 @@
+{
+  "api": {
+    "version": "v0",
+    "basePath": "/api/v0",
+    "gatewayUriLocal": "http://localhost:8100",
+    "gatewayUriProd": "https://api.ucust.n4d3sh1k4.site",
+    "auth": {
+      "type": "Bearer",
+      "accessTokenHeader": "Authorization: Bearer <accessToken>",
+      "refreshTokenCookie": "refreshToken",
+      "note": "Access token приходит в body, refresh token — в куке. При каждом ответе логина/refresh кука перезаписывается. Все ответы с не-null телом (кроме String/byte[]/Resource) оборачиваются в ApiResponse-обёртку { success: true, data: ... }. Access token содержит claims: sub (userId), roles (ROLE_*), city (определяется по IP через гео-сервис; claim отсутствует, если город не удалось определить — напр. локальный адрес).",
+      "publicRoutes": [
+        "/api/v0/auth/login",
+        "/api/v0/auth/register",
+        "/api/v0/auth/refresh",
+        "/api/v0/auth/forgot-password",
+        "/api/v0/auth/reset-password",
+        "/api/v0/auth/confirm-email",
+        "/api/v0/auth/resend-confirmation",
+        "/api/v0/auth/yandex-mobile",
+        "/api/v0/auth/link-social",
+        "/api/v0/auth/change-email/set-new-email",
+        "/api/v0/auth/change-email/confirm",
+        "/api/v0/oauth2/**",
+        "/api/v0/login/oauth2/**",
+        "/api/v0/tariffs",
+        "/api/v0/tariffs/{id}"
+      ]
+    },
+    "services": [
+      {
+        "name": "security-service",
+        "controllers": {
+          "AuthController": {
+            "tag": "Авторизация",
+            "basePath": "/auth",
+            "note": "Эндпоинты /auth/sessions и /auth/sessions/{id} проксируются через gateway (authFilter, JWT обязателен).",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/register",
+                "summary": "Регистрация пользователей",
+                "auth": "public",
+                "requestBody": {
+                  "firstName": { "type": "string", "required": true, "description": "Имя" },
+                  "lastName": { "type": "string", "required": true, "description": "Фамилия" },
+                  "email": { "type": "string", "required": true, "description": "Почта" },
+                  "password": { "type": "string", "required": true, "description": "Пароль" },
+                  "confirmPassword": { "type": "string", "required": true, "description": "Повтор пароля" }
+                },
+                "response": "200 OK — регистрация не выдаёт JWT и не ставит куку; дальше подтвердить email и залогиниться"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/auth/confirm-email",
+                "summary": "Подтверждение почты (переход по ссылке из письма)",
+                "auth": "public",
+                "queryParams": {
+                  "token": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/resend-confirmation",
+                "summary": "Повторная отправка письма активации",
+                "auth": "public",
+                "queryParams": {
+                  "email": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/login",
+                "summary": "Авторизация пользователей",
+                "auth": "public",
+                "requestBody": {
+                  "email": { "type": "string", "required": true },
+                  "password": { "type": "string", "required": true },
+                  "rememberMe": { "type": "boolean", "required": false, "default": false, "description": "Долгая сессия (большой TTL refresh-токена)" }
+                },
+                "response": "JwtResponse { accessToken: string }",
+                "cookies": ["refreshToken (httpOnly)"]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/refresh",
+                "summary": "Обновление refresh токена",
+                "auth": "public",
+                "cookies": ["refreshToken", "required"],
+                "response": "JwtResponse { accessToken: string } + новая кука"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/logout",
+                "summary": "Выход из аккаунта",
+                "auth": "Bearer",
+                "cookies": ["refreshToken (необязательно)"],
+                "response": "200 OK 'Logged out successfully' + кука на удаление"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/forgot-password",
+                "summary": "Смена/восстановление пароля. Шаг 1: отправить письмо",
+                "auth": "public",
+                "requestBody": {
+                  "email": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/reset-password",
+                "summary": "Смена/восстановление пароля. Шаг 2: установить новый",
+                "auth": "public",
+                "requestBody": {
+                  "token": { "type": "string", "required": true, "description": "Токен из письма" },
+                  "newPassword": { "type": "string", "required": true },
+                  "confirmPassword": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/yandex-mobile",
+                "summary": "Авторизация через Яндекс (мобильный токен)",
+                "auth": "public (маршрут gateway), но на сервисе фактически требуется JWT",
+                "note": "Gateway-маршрут public, однако SecurityConfig сервиса НЕ permitAll этот путь → без валидного JWT вернёт 401",
+                "requestBody": {
+                  "accessToken": { "type": "string", "required": true, "description": "Access token от Яндекс OAuth" }
+                },
+                "response": "JwtResponse { accessToken: string } + кука"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/link-social",
+                "summary": "Привязка соцсети к аккаунту (после ввода пароля)",
+                "auth": "public (маршрут gateway), но на сервисе фактически требуется JWT",
+                "note": "Gateway-маршрут public, однако SecurityConfig сервиса НЕ permitAll этот путь → без валидного JWT вернёт 401",
+                "requestBody": {
+                  "email": { "type": "string", "required": true },
+                  "password": { "type": "string", "required": true },
+                  "provider": { "type": "AuthProvider enum", "required": true, "values": "GOOGLE|YANDEX|..." },
+                  "providerUserId": { "type": "string", "required": true }
+                },
+                "response": "JwtResponse { accessToken: string } + кука"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/change-email/verify-password",
+                "summary": "Смена почты. Шаг 1: подтвердить пароль",
+                "auth": "Bearer",
+                "requestBody": {
+                  "password": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/change-email/set-new-email",
+                "summary": "Смена почты. Шаг 2: отправить код на новую почту",
+                "auth": "public",
+                "requestBody": {
+                  "token": { "type": "string", "required": true },
+                  "newEmail": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/change-email/confirm",
+                "summary": "Смена почты. Шаг 3: подтвердить смену",
+                "auth": "public",
+                "requestBody": {
+                  "token": { "type": "string", "required": true },
+                  "code": { "type": "string", "required": true }
+                },
+                "response": "200 OK"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/auth/sessions",
+                "summary": "Список активных сессий текущего пользователя",
+                "auth": "Bearer",
+                "cookies": ["refreshToken (для пометки current)", "необязательно"],
+                "response": "SessionResponse[] { id: UUID, ip: string, city: string, userAgent: string, createdAt: Instant, expiresAt: Instant, rememberMe: boolean, current: boolean }"
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/auth/sessions/{sessionId}",
+                "summary": "Завершить конкретную сессию по ID (текущую через этот эндпоинт удалить нельзя)",
+                "auth": "Bearer",
+                "pathParams": { "sessionId": "UUID" },
+                "cookies": ["refreshToken (для исключения текущей сессии)"],
+                "response": "204 No Content"
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/auth/sessions",
+                "summary": "Завершить все сессии кроме текущей (выход со всех устройств)",
+                "auth": "Bearer",
+                "cookies": ["refreshToken (необязательно)"],
+                "response": "204 No Content"
+              }
+            ]
+          },
+          "StatusController": {
+            "tag": "Статус",
+            "basePath": "/status",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/status/hello",
+                "summary": "Проверка работоспособности",
+                "auth": "Bearer",
+                "response": "200 OK 'hello'"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/status/me",
+                "summary": "Данные текущего пользователя из заголовков Gateway",
+                "auth": "Bearer",
+                "response": "{ userId: string, roles: string[], source: string }"
+              }
+            ]
+          },
+          "UserController": {
+            "tag": "Пользователи",
+            "basePath": "/users",
+            "note": "НЕ проксируется через gateway (без /api/v0 маршрута)",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/users/check-me",
+                "summary": "Проверить свои роли (authorities)",
+                "auth": "Bearer (напрямую в сервис)",
+                "response": "string"
+              }
+            ]
+          },
+          "BanController": {
+            "tag": "Баны",
+            "basePath": "/admin/bans",
+            "note": "НЕ проксируется через gateway (без /api/v0 маршрута); требует ROLE_ADMIN на сервисе",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/admin/bans",
+                "summary": "Забанить пользователя (админ)",
+                "auth": "Bearer (напрямую в сервис)",
+                "requestBody": {
+                  "userId": { "type": "UUID", "required": true },
+                  "reason": { "type": "string", "required": true },
+                  "expiresAt": { "type": "ISO-8601 Instant", "required": false, "description": "null = бессрочный бан" }
+                },
+                "response": "201 Created BanResponse"
+              },
+              {
+                "method": "POST",
+                "path": "/admin/bans/{id}/unban",
+                "summary": "Разбанить (деактивировать бан)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "200 OK"
+              },
+              {
+                "method": "GET",
+                "path": "/admin/bans",
+                "summary": "Все активные баны",
+                "auth": "Bearer",
+                "response": "BanResponse[]"
+              },
+              {
+                "method": "GET",
+                "path": "/admin/bans/user/{userId}",
+                "summary": "Активный бан пользователя",
+                "auth": "Bearer",
+                "pathParams": { "userId": "UUID" },
+                "response": "200 BanResponse | 204 если нет"
+              },
+              {
+                "method": "GET",
+                "path": "/admin/bans/user/{userId}/history",
+                "summary": "История банов пользователя",
+                "auth": "Bearer",
+                "pathParams": { "userId": "UUID" },
+                "response": "BanResponse[]"
+              },
+              {
+                "method": "GET",
+                "path": "/admin/bans/user/{userId}/check",
+                "summary": "Проверить, забанен ли пользователь",
+                "auth": "Bearer",
+                "pathParams": { "userId": "UUID" },
+                "response": "boolean"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "user-service",
+        "controllers": {
+          "ProfileController": {
+            "tag": "Профиль",
+            "basePath": "/user",
+            "gatewayPattern": "/api/v0/user/**",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/user/me",
+                "summary": "Получить профиль текущего пользователя",
+                "auth": "Bearer",
+                "response": "ProfileResponse (полная информация о профиле)"
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/user/me",
+                "summary": "Обновить профиль (имя, отчество, фамилия, телефон, должность)",
+                "auth": "Bearer",
+                "requestBody": {
+                  "firstName": { "type": "string", "required": false, "constraints": "кириллица, дефис; 2-50" },
+                  "middleName": { "type": "string", "required": false, "constraints": "кириллица, дефис; 2-50" },
+                  "lastName": { "type": "string", "required": false, "constraints": "кириллица, дефис; 2-50" },
+                  "phone": { "type": "string", "required": false, "constraints": "11 цифр, начинается с 79" },
+                  "position": { "type": "string", "required": false, "constraints": "2-50" }
+                },
+                "response": "ProfileResponse"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/user/me/avatar",
+                "summary": "Загрузить аватар",
+                "auth": "Bearer",
+                "contentType": "multipart/form-data",
+                "formParams": { "file": "JPEG/PNG изображение" },
+                "response": "ApiResponse<String> { success, data: avatarUrl }"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "business-service",
+        "controllers": {
+          "ProjectController": {
+            "tag": "Проекты",
+            "basePath": "/projects",
+            "gatewayPattern": "/api/v0/projects/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/projects",
+                "summary": "Создать проект",
+                "auth": "Bearer",
+                "requestBody": {
+                  "name": { "type": "string", "required": true, "constraints": "2-100" },
+                  "industry": { "type": "Industry enum", "required": true },
+                  "city": { "type": "string", "required": true, "constraints": "max 50" },
+                  "description": { "type": "string", "required": false, "constraints": "max 2000" },
+                  "targetAudience": { "type": "string", "required": false, "constraints": "max 500" },
+                  "toneOfVoice": { "type": "ToneOfVoice enum", "required": true },
+                  "socialLinks": {
+                    "type": "object",
+                    "required": false,
+                    "fields": {
+                      "instagram": { "type": "string", "pattern": "^https://.*" },
+                      "telegram": { "type": "string" },
+                      "website": { "type": "string" }
+                    }
+                  },
+                  "businessHours": { "type": "object", "required": false, "fields": "BusinessHoursRequest" },
+                  "brandProfile": { "type": "string", "description": "Брендбук как JSON-строка (рынок, SWOT, услуги, цели, тон)", "required": false, "constraints": "max 100000" }
+                },
+                "response": "ProjectResponse"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/projects/{id}",
+                "summary": "Получить проект по ID",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "ProjectResponse"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/projects",
+                "summary": "Получить свои проекты",
+                "auth": "Bearer",
+                "response": "ProjectResponse[]"
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/projects/{id}",
+                "summary": "Частично обновить проект",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "requestBody": {
+                  "name": { "type": "string", "required": false, "constraints": "2-100" },
+                  "industry": { "type": "Industry enum", "required": false },
+                  "city": { "type": "string", "required": false, "constraints": "max 50" },
+                  "description": { "type": "string", "required": false, "constraints": "max 2000" },
+                  "targetAudience": { "type": "string", "required": false, "constraints": "max 500" },
+                  "toneOfVoice": { "type": "ToneOfVoice enum", "required": false },
+                  "socialLinks": { "type": "object", "required": false },
+                  "businessHours": { "type": "object", "required": false },
+                  "brandProfile": { "type": "string", "description": "Брендбук как JSON-строка", "required": false, "constraints": "max 100000" }
+                },
+                "response": "ProjectResponse"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/projects/{id}/logo",
+                "summary": "Загрузить логотип проекта",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "contentType": "multipart/form-data",
+                "formParams": { "file": "JPEG/PNG изображение" },
+                "response": "string (url логотипа)"
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/projects/{id}",
+                "summary": "Удалить проект",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "200 OK"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "billing-service",
+        "controllers": {
+          "TariffController": {
+            "tag": "Тарифы",
+            "basePath": "/tariffs",
+            "gatewayPattern": "/api/v0/tariffs, /api/v0/tariffs/** (public)",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/tariffs",
+                "summary": "Все тарифы",
+                "auth": "public",
+                "response": "TariffResponse[]"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/tariffs/{id}",
+                "summary": "Тариф по ID",
+                "auth": "public",
+                "pathParams": { "id": "UUID" },
+                "response": "TariffResponse"
+              }
+            ]
+          },
+          "UserQuotaController": {
+            "tag": "Квоты пользователя",
+            "basePath": "/quota",
+            "gatewayPattern": "/api/v0/quota/me, /api/v0/quota/me/**",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/quota/me",
+                "summary": "Получить свою квоту по фиче",
+                "auth": "Bearer",
+                "queryParams": { "feature": { "type": "string", "default": "generation", "required": false } },
+                "response": "CheckQuotaResponse"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/quota/me/tariff",
+                "summary": "Свой тариф и квоты по всем фичам",
+                "auth": "Bearer",
+                "response": "SubscriptionOverview | 404"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/quota/me/purchase",
+                "summary": "Купить тариф (заглушка)",
+                "auth": "Bearer",
+                "requestBody": {
+                  "tariffId": { "type": "UUID", "required": true }
+                },
+                "response": "SubscriptionOverview"
+              }
+            ]
+          },
+          "AdminSubscriptionController": {
+            "tag": "Админ: подписки",
+            "basePath": "/admin/billing/subscriptions",
+            "gatewayPattern": "/api/v0/admin/billing/**",
+            "endpoints": [
+              {
+                "method": "PUT",
+                "path": "/api/v0/admin/billing/subscriptions/{userId}/tariff/{tariffId}",
+                "summary": "Выдать пользователю тариф (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "userId": "UUID", "tariffId": "UUID" },
+                "response": "SubscriptionResponse"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/admin/billing/subscriptions/{userId}",
+                "summary": "Подписка пользователя (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "userId": "UUID" },
+                "response": "SubscriptionResponse | 404"
+              }
+            ]
+          },
+          "QuotaController": {
+            "tag": "Квоты (internal)",
+            "basePath": "/internal/quota",
+            "note": "Внутренний сервис-ту-сервис, НЕ проксируется через gateway; вызывается generative-orchestration-service напрямую на :8106",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/internal/quota/check",
+                "summary": "Проверить квоту пользователя",
+                "auth": "internal",
+                "requestBody": {
+                  "userId": { "type": "UUID", "required": true },
+                  "feature": { "type": "string", "required": true },
+                  "requested": { "type": "int", "required": true }
+                },
+                "response": "CheckQuotaResponse"
+              },
+              {
+                "method": "POST",
+                "path": "/internal/quota/use/{userId}/{feature}",
+                "summary": "Инкрементировать использование",
+                "auth": "internal",
+                "pathParams": { "userId": "UUID", "feature": "string" },
+                "response": "200 OK"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "generative-orchestration-service",
+        "controllers": {
+          "AsyncGenerationController": {
+            "tag": "Асинхронная генерация контента",
+            "basePath": "/orchestration",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/generate/async",
+                "summary": "Отправить задачу на генерацию в AI-сервис",
+                "auth": "Bearer",
+                "requestBody": {
+                  "projectId": { "type": "UUID", "required": true },
+                  "count": { "type": "int", "required": false, "default": 1 },
+                  "mode": { "type": "GenerationMode enum", "required": true },
+                  "prompt": { "type": "string", "required": false },
+                  "industry": { "type": "string", "required": false },
+                  "description": { "type": "string", "required": false },
+                  "targetAudience": { "type": "string", "required": false },
+                  "toneOfVoice": { "type": "string", "required": false },
+                  "city": { "type": "string", "required": false },
+                  "currentMonth": { "type": "string", "required": false },
+                  "currentYear": { "type": "int", "required": false }
+                },
+                "response": "202 Accepted AsyncGenerateResponse { taskId }"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/orchestration/tasks/{taskId}",
+                "summary": "Проверить статус выполнения задачи",
+                "auth": "Bearer",
+                "pathParams": { "taskId": "UUID" },
+                "response": "TaskStatusResponse"
+              }
+            ]
+          },
+          "GenerationController": {
+            "tag": "Генерация контента",
+            "basePath": "/orchestration",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/ai-review",
+                "summary": "AI-аудит поста (критик Чарли Мангера через /api/v1/ai/critic/review; текст поста + niche из проекта; только владелец)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "CriticReviewResponse { status, critic, data, error }",
+                "note": "Возвращает правки/замечания для улучшения; применение правок — через PATCH posts/{id}"
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/orchestration/posts/{id}",
+                "summary": "Сохранить отредактированный пост (partial; только владелец)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "requestBody": {
+                  "text": { "type": "string", "required": false },
+                  "imageUrl": { "type": "string", "required": false },
+                  "hashtags": { "type": "string", "required": false },
+                  "targetPlatforms": { "type": "string", "required": false },
+                  "scheduledAt": { "type": "ISO-8601 Instant", "required": false }
+                },
+                "response": "PostResponse",
+                "note": "Владельцем считается пользователь, чей userId совпадает с userId поста"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/confirm",
+                "summary": "Подтвердить пост (только владелец)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "PostResponse"
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/publish",
+                "summary": "Опубликовать пост",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "PostResponse"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/orchestration/posts/{id}",
+                "summary": "Получить пост по ID",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "PostResponse"
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/orchestration/projects/{projectId}/posts",
+                "summary": "Посты проекта",
+                "auth": "Bearer",
+                "pathParams": { "projectId": "UUID" },
+                "response": "PostResponse[]"
+              }
+            ]
+          },
+          "AiGenerationController": {
+            "tag": "Генерация поста через Единый Шлюз",
+            "basePath": "/orchestration",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/generate",
+                "summary": "Сгенерировать пост (проверка и инкремент квоты 'post'; синхронный вызов Единого Шлюза Оркестратора; payload обогащается структурированными flat-ключами из проекта: company_name/niche/.../usp/key_benefits/brand_goals/products_catalog; брендбук индексируется в RAG (/api/v1/ai/rag/ingest))",
+                "auth": "Bearer",
+                "requestBody": {
+                  "projectId": { "type": "UUID", "required": true },
+                  "prompt": { "type": "string", "required": true },
+                  "companyName": { "type": "string", "required": false },
+                  "niche": { "type": "string", "required": false },
+                  "attachments": { "type": "string[]", "description": "S3/MinIO URLs", "required": false },
+                  "promoCode": { "type": "string", "required": false },
+                  "format": { "type": "string", "description": "POST | VIDEO", "required": false },
+                  "toneOfVoice": { "type": "string", "description": "override тональности, напр. WARM", "required": false },
+                  "postLength": { "type": "string", "description": "SHORT | MEDIUM | LONG", "required": false },
+                  "targetPlatforms": { "type": "string[]", "description": "VK, TELEGRAM, ...", "required": false },
+                  "rubric": { "type": "string", "description": "напр. MENU_UPDATE", "required": false },
+                  "primaryCta": { "type": "string", "required": false },
+                  "targetActionLink": { "type": "string", "required": false }
+                },
+                "response": "PostResponse",
+                "errorResponses": "402 PAYMENT_REQUIRED QUOTA_EXCEEDED (исчерпана квота 'post'); 502 AI_GENERATION_FAILED"
+              }
+            ]
+          },
+          "AiOrchestrationController": {
+            "tag": "AI-оркестрация passthrough",
+            "basePath": "/orchestration",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/ai/execute",
+                "summary": "Универсальный вызов Единого Шлюза Оркестратора (без квот; brand_id инжектится в payload)",
+                "auth": "Bearer",
+                "requestBody": {
+                  "taskType": { "type": "string", "required": true },
+                  "projectId": { "type": "UUID", "required": false },
+                  "payload": { "type": "object", "required": false },
+                  "syncBackend": { "type": "boolean", "required": false, "default": false }
+                },
+                "response": "OrchestratorResponse { status, task_type, user_id, session_id, data, timings, error }"
+              }
+            ]
+          },
+          "AiCallbackController": {
+            "tag": "AI callback (входящий от AI-сервера)",
+            "basePath": "/api/v1/ai",
+            "note": "Публичный маршрут gateway /api/v1/ai/**; JWT НЕ требуется — проверяется заголовок X-Internal-Secret (constant-time)",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v1/ai/callback",
+                "summary": "Webhook: AI-сервер пушит результат (auto-push при sync_backend=true; generate_post → Post DRAFT, session_id = projectId)",
+                "auth": "X-Internal-Secret header",
+                "requestBody": {
+                  "user_id": { "type": "UUID", "required": false },
+                  "session_id": { "type": "UUID", "required": false, "description": "projectId" },
+                  "task_type": { "type": "string", "required": false },
+                  "status": { "type": "string", "required": false },
+                  "result": { "type": "object", "required": false },
+                  "timestamp": { "type": "string", "required": false }
+                },
+                "response": "ApiResponse"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
