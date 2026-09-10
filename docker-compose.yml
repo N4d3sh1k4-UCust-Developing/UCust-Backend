@@ -37,8 +37,8 @@ services:
   security-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/security-service:latest
     container_name: security-service-ucust
-environment:
-- SPRING_PROFILES_ACTIVE=prod
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx512m -Xms256m
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
