@@ -154,6 +154,8 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
       - MINIO_PUBLIC_BASE_URL=${MINIO_PUBLIC_BASE_URL}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_PROXY=${TELEGRAM_BOT_PROXY:-http://xray:1080}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -162,3 +164,21 @@ services:
       resources:
         limits:
           memory: 512M
+
+  # Локальный VLESS-клиент (MagnumVPN): подписка MagnumVPN → TUN -> HTTP-прокси
+  # внутри ucust-net. Нужен только для верификации соцсетей с rinhbaby (RU-сеть,
+  # api.telegram.org блокируется напрямую). Конфиг (нода + UUID) правится вручную
+  # на сервере: /home/n4d3sh1k4/projects/ucust/xray/config.json (не в git).
+  xray:
+    image: teddysun/xray:latest
+    container_name: xray-ucust
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - /home/n4d3sh1k4/projects/ucust/xray/config.json:/etc/xray/config.json:ro
+    networks:
+      - ucust-net
+    deploy:
+      resources:
+        limits:
+          memory: 64M
