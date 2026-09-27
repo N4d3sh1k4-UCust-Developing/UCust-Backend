@@ -12,6 +12,7 @@
         "/api/v0/auth/login",
         "/api/v0/auth/register",
         "/api/v0/auth/refresh",
+        "/api/v0/auth/oauth-bootstrap",
         "/api/v0/auth/forgot-password",
         "/api/v0/auth/reset-password",
         "/api/v0/auth/confirm-email",
@@ -25,6 +26,54 @@
         "/api/v0/tariffs",
         "/api/v0/tariffs/{id}"
       ]
+    },
+    "responseContract": {
+      "note": "У каждого эндпоинта ниже есть поле \"responses\" — полный перечень возможных ответов сервера: успех (поле description) и ошибки (code/when). Строковые поля response и errorResponses оставлены как прежнее краткое человекочитаемое описание.",
+      "envelope": "Ответы сервисов оборачиваются в ApiResponse: { success: boolean, data: <payload>, error: { code, message }, pagination }. @JsonInclude(NON_NULL) вырезает null-поля, поэтому в успешном ответе error отсутствует, а в ошибочном — data. Пример ошибки: { \"success\": false, \"error\": { \"code\": \"NOT_FOUND\", \"message\": \"Project not found\" } }",
+      "globalErrors": [
+        { "status": 400, "code": "VALIDATION_ERROR", "when": "нарушение @Valid на теле запроса; message = сообщение первого field-error" },
+        { "status": 400, "code": "MISSING_FILE", "when": "обязательная multipart-часть запроса отсутствует (MissingServletRequestPartException)" },
+        { "status": 401, "code": "AUTH_ERROR", "when": "BadCredentialsException — неверный email или пароль" },
+        { "status": 403, "code": "ACCESS_DENIED", "when": "AccessDeniedException — недостаточно прав, в т.ч. /admin/** без ROLE_ADMIN" },
+        { "status": 403, "code": "EMAIL_NOT_VERIFIED", "when": "DisabledException — аккаунт не активирован или отключён" },
+        { "status": 500, "code": "TOKEN_GENERATION_FAILED", "when": "TokenCreationException (security-service) — не удалось создать токен" },
+        { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "любое необработанное исключение; message = \\\"Server error \\\" + ex.getMessage()" }
+      ],
+      "gatewayRejections": {
+        "note": "Эти ответы api-gateway отдаёт ДО сервиса, поэтому тела у них НЕТ — никакой ApiResponse. В поле responses они помечены code: null, body: \"empty\".",
+        "401": "нет заголовка Authorization: Bearer либо токен невалиден/просрочен (AuthenticationGatewayFilterFactory)",
+        "403": "админ-маршрут с валидным токеном без ROLE_ADMIN (AdminAuthenticationGatewayFilterFactory). Тот же 403 без тела даёт SecurityFilterChain сервиса, если gateway-маршрут публичный и не передал X-User-Id — например POST/PUT/DELETE /api/v0/tariffs.",
+        "directCall401": "при ПРЯМОМ вызове сервиса в обход gateway SecurityConfig отдаёт сырой { \"error\": \"Unauthorized\", \"message\": ... } — тоже без поля code (в responses помечено code: \"Unauthorized\", body: \"raw\")"
+      },
+      "rawBodyResponses": "БЕЗ обёртки ApiResponse: все /internal/** (raw-body S2S-контракт, исключены в GlobalResponseHandler — напр. /internal/quota/check для QuotaClient), любые String-возвраты (/api/v0/status/hello, /users/check-me, /api/v0/projects/{id}/logo), все 204 No Content, а также прямые 401/403 от SecurityFilterChain."
+    },
+    "gatewayRoutes": {
+      "minio-s3-public": {
+        "path": "/s3/**",
+        "auth": "public (без JWT)",
+        "note": "Публичный доступ к файлам MinIO (медиа постов, аватары): stripPrefix(1) → minio.s3.uri. URL вида /s3/{bucket}/{objectKey}",
+        "target": "minio.s3.uri"
+      },
+      "ai-callback-public": {
+        "path": "/api/v1/ai/**",
+        "auth": "public (без JWT)",
+        "note": "Auto-Push от Единого Шлюза Оркестратора; проверка X-Internal-Secret в AiCallbackController",
+        "target": "generative-orchestration-service"
+      },
+      "adminUi": {
+        "note": "Служебные админ-роуты gateway (вне /api/v0): RabbitMQ UI /admin/rabbit/**, MinIO Console /admin/minio/**, PgAdmin /admin/pgadmin/**, Dozzle /admin/monitoring/**, Swagger UI /admin/swagger/**, OpenAPI JSON /admin/api-docs/{service}",
+        "auth": "adminAuthFilter (кроме /admin/pgadmin/** и /admin/swagger/** которые без adminAuthFilter), preserveHostHeader для RabbitMQ/MinIO"
+      },
+      "swaggerDocs": {
+        "auth": "adminAuthFilter",
+        "paths": {
+          "/admin/api-docs/security-service": "security-service /v3/api-docs",
+          "/admin/api-docs/user-service": "user-service /v3/api-docs",
+          "/admin/api-docs/business-service": "business-service /v3/api-docs",
+          "/admin/api-docs/billing-service": "billing-service /v3/api-docs",
+          "/admin/api-docs/generative-orchestration-service": "generative-orchestration-service /v3/api-docs"
+        }
+      }
     },
     "services": [
       {
@@ -49,7 +98,12 @@
                   "password": { "type": "string", "required": true, "description": "Пароль" },
                   "confirmPassword": { "type": "string", "required": true, "description": "Повтор пароля" }
                 },
-                "response": "200 OK — регистрация не выдаёт JWT и не ставит куку; дальше подтвердить email и залогиниться"
+                "response": "200 OK — регистрация не выдаёт JWT и не ставит куку; дальше подтвердить email и залогиниться",
+                "responses": [
+                    { "status": 200, "description": "Пользователь создан и отправлено письмо активации. Тело пустое, JWT не выдаётся." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid RegisterRequest: пустое имя/фамилия, некорректный email, пароль короче 6 символов или confirmPassword не совпадает" },
+                    { "status": 409, "code": "USER_ALREADY_EXISTS", "when": "email уже зарегистрирован" }
+                  ]
               },
               {
                 "method": "GET",
@@ -59,7 +113,13 @@
                 "queryParams": {
                   "token": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Аккаунт активирован (user.enabled=true), токен удалён, публикуется outbox-событие user.email.confirmed. Тело пустое." },
+                    { "status": 404, "code": "NOT_FOUND", "when": "токен активации не найден в БД" },
+                    { "status": 410, "code": "LINK_EXPIRED", "when": "токен найден, но срок истёк" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "обязательный query-параметр token отсутствует (MissingServletRequestParameterException не имеет отдельного обработчика) или ошибка БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -69,7 +129,15 @@
                 "queryParams": {
                   "email": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Старый VERIFICATION-токен удалён, создан новый, отправлено письмо активации. Тело пустое." },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "пользователя с таким email нет" },
+                    { "status": 409, "code": "USER_ALREADY_ACTIVATED", "when": "аккаунт уже подтверждён" },
+                    { "status": 429, "code": "RATE_LIMIT_EXCEEDED", "when": "предыдущий токен создан меньше email.send.cooldown минут назад" },
+                    { "status": 500, "code": "TOKEN_GENERATION_FAILED", "when": "старый токен существует, но его дата создания NULL" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "обязательный query-параметр email отсутствует или ошибка БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -82,7 +150,15 @@
                   "rememberMe": { "type": "boolean", "required": false, "default": false, "description": "Долгая сессия (большой TTL refresh-токена)" }
                 },
                 "response": "JwtResponse { accessToken: string }",
-                "cookies": ["refreshToken (httpOnly)"]
+                "cookies": ["refreshToken (httpOnly)"],
+                "responses": [
+                    { "status": 200, "description": "JwtResponse { accessToken } в body + Set-Cookie: refreshToken. Claims токена: sub (userId), roles, city (может отсутствовать)." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid LoginRequest: пустой email или password" },
+                    { "status": 401, "code": "AUTH_ERROR", "when": "неверный email или пароль" },
+                    { "status": 403, "code": "EMAIL_NOT_VERIFIED", "when": "аккаунт не активирован" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "аккаунт заблокирован (бан) или DisabledException" },
+                    { "status": 429, "code": "RATE_LIMIT_EXCEEDED", "when": "Bucket4j: превышен лимит попыток входа с одного IP или аккаунт временно заблокирован" }
+                  ]
               },
               {
                 "method": "POST",
@@ -90,7 +166,31 @@
                 "summary": "Обновление refresh токена",
                 "auth": "public",
                 "cookies": ["refreshToken", "required"],
-                "response": "JwtResponse { accessToken: string } + новая кука"
+                "response": "JwtResponse { accessToken: string } + новая кука",
+                "errorResponses": "401 REFRESH_TOKEN_NOT_FOUND/REFRESH_TOKEN_EXPIRED; 403 EMAIL_NOT_VERIFIED (аккаунт отключён — enabled проверяется и при refresh); 429 RATE_LIMIT_EXCEEDED (аккаунт временно заблокирован — lockTime проверяется и при refresh)",
+                "responses": [
+                    { "status": 200, "description": "Новый JwtResponse { accessToken } + перезаписанная Set-Cookie: refreshToken" },
+                    { "status": 401, "code": null, "body": "empty", "when": "контроллер: кука refreshToken отсутствует (ResponseEntity.status(401).build(), тело пустое)" },
+                    { "status": 401, "code": "REFRESH_TOKEN_EXPIRED", "when": "refresh-токен истёк" },
+                    { "status": 403, "code": "EMAIL_NOT_VERIFIED", "when": "аккаунт отключён (DisabledException)" },
+                    { "status": 404, "code": "REFRESH_TOKEN_NOT_FOUND", "when": "refresh-токен не найден или невалиден" },
+                    { "status": 429, "code": "RATE_LIMIT_EXCEEDED", "when": "аккаунт временно заблокирован после частых refresh" }
+                  ]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/auth/oauth-bootstrap",
+                "summary": "Переустановка refresh-куки после OAuth2-входа",
+                "auth": "public (маршрут gateway), но требуется валидный Bearer access-токен",
+                "note": "Фронт вызывает после редиректа соцсети (Firefox dFPI не доносит куку из 302); по access-токену выдаётся свежая refresh-кука",
+                "headers": { "Authorization": "Bearer <accessToken>" },
+                "response": "JwtResponse { accessToken: string } + новая кука",
+                "responses": [
+                    { "status": 200, "description": "Новый JwtResponse { accessToken } + свежая Set-Cookie: refreshToken (нужно после OAuth2-редиректа, когда кука легла в чужую браузерную партицию)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "контроллер: заголовок Authorization отсутствует или не начинается с 'Bearer '" },
+                    { "status": 401, "code": "ACCESS_TOKEN_INVALID", "when": "access-токен не проходит валидацию" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "пользователь по subject токена не найден" }
+                  ]
               },
               {
                 "method": "POST",
@@ -98,7 +198,12 @@
                 "summary": "Выход из аккаунта",
                 "auth": "Bearer",
                 "cookies": ["refreshToken (необязательно)"],
-                "response": "200 OK 'Logged out successfully' + кука на удаление"
+                "response": "200 OK 'Logged out successfully' + кука на удаление",
+                "responses": [
+                    { "status": 200, "description": "Refresh-токен удалён, Set-Cookie: refreshToken с Max-Age=0. Тело пустое. Токен чужого/несуществующего пользователя удаляется тихо (ошибки нет)." },
+                    { "status": 404, "code": "NOT_FOUND", "when": "кука refreshToken отсутствует" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" }
+                  ]
               },
               {
                 "method": "POST",
@@ -108,7 +213,12 @@
                 "requestBody": {
                   "email": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Письмо для восстановления пароля отправлено (если email зарегистрирован). Тело пустое. Ответ одинаков для существующего и несуществующего email." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ForgotPasswordRequest: пустой или некорректный email" },
+                    { "status": 429, "code": "RATE_LIMIT_EXCEEDED", "when": "слишком частые запросы сброса пароля" }
+                  ]
               },
               {
                 "method": "POST",
@@ -120,7 +230,13 @@
                   "newPassword": { "type": "string", "required": true },
                   "confirmPassword": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Пароль изменён, все активные сессии сброшены. Тело пустое." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ResetPasswordRequest: новый пароль короче 6 символов, пустой токен или неверный формат email" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пользователь по токену не найден" },
+                    { "status": 410, "code": "TOKEN_EXPIRED", "when": "токен сброса пароля истёк" }
+                  ]
               },
               {
                 "method": "POST",
@@ -131,7 +247,12 @@
                 "requestBody": {
                   "accessToken": { "type": "string", "required": true, "description": "Access token от Яндекс OAuth" }
                 },
-                "response": "JwtResponse { accessToken: string } + кука"
+                "response": "JwtResponse { accessToken: string } + кука",
+                "responses": [
+                    { "status": 200, "description": "JwtResponse { accessToken } + Set-Cookie: refreshToken (rememberMe=true). Пользователь создаётся при первом входе." },
+                    { "status": 401, "code": "Unauthorized", "body": "raw", "when": "прямой вызов сервиса без JWT: SecurityConfig не permitAll для этого пути, anyRequest().authenticated() → JwtAuthenticationEntryPoint пишет сырой {error, message} БЕЗ ApiResponse и без code" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "неверный или истёкший Yandex-токен: RestTemplate.exchange без error-handler → HttpClientErrorException (лог: '401 Unauthorized: ...'); также OAuthEmailAlreadyExistsException (RuntimeException, не BaseException — обработчика нет), пустой accessToken, ответ Яндекса без email или недоступность login.yandex.ru" }
+                  ]
               },
               {
                 "method": "POST",
@@ -145,7 +266,14 @@
                   "provider": { "type": "AuthProvider enum", "required": true, "values": "GOOGLE|YANDEX|..." },
                   "providerUserId": { "type": "string", "required": true }
                 },
-                "response": "JwtResponse { accessToken: string } + кука"
+                "response": "JwtResponse { accessToken: string } + кука",
+                "responses": [
+                    { "status": 200, "description": "Соцсеть привязана к аккаунту. JwtResponse { accessToken } + Set-Cookie: refreshToken" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid LinkSocialRequest: пустой email/password или некорректный provider" },
+                    { "status": 401, "code": "AUTH_ERROR", "when": "неверный email или пароль (BadCredentialsException)" },
+                    { "status": 403, "code": "EMAIL_NOT_VERIFIED", "when": "аккаунт не активирован" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "пользователь с таким email не найден" }
+                  ]
               },
               {
                 "method": "POST",
@@ -155,7 +283,14 @@
                 "requestBody": {
                   "password": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Пароль подтверждён, создан токен смены email. Тело пустое." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid VerifyPasswordRequest: пустой пароль" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 403, "code": "INVALID_PASSWORD", "when": "пароль не совпадает" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "пользователь по principal не найден" }
+                  ]
               },
               {
                 "method": "POST",
@@ -166,7 +301,14 @@
                   "token": { "type": "string", "required": true },
                   "newEmail": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Код подтверждения отправлен на новый email. Тело пустое." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid SetNewEmailRequest: пустой токен или некорректный email" },
+                    { "status": 404, "code": "TOKEN_NOT_FOUND", "when": "токен смены email не найден" },
+                    { "status": 409, "code": "EMAIL_EXISTS", "when": "новый email уже используется" },
+                    { "status": 410, "code": "TOKEN_EXPIRED", "when": "токен смены email истёк" }
+                  ]
               },
               {
                 "method": "POST",
@@ -177,24 +319,42 @@
                   "token": { "type": "string", "required": true },
                   "code": { "type": "string", "required": true }
                 },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Email изменён, событие user.email.change.done опубликовано в RabbitMQ. Тело пустое." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ConfirmEmailChangeRequest: пустой токен или код" },
+                    { "status": 400, "code": "INVALID_STATE", "when": "новый email ещё не задан (шаг set-new-email не выполнялся)" },
+                    { "status": 403, "code": "INVALID_CODE", "when": "код подтверждения неверный" },
+                    { "status": 404, "code": "TOKEN_NOT_FOUND", "when": "токен смены email не найден" },
+                    { "status": 410, "code": "TOKEN_EXPIRED", "when": "токен смены email истёк" }
+                  ]
               },
               {
                 "method": "GET",
                 "path": "/api/v0/auth/sessions",
-                "summary": "Список активных сессий текущего пользователя",
+                "summary": "Список активных сессий текущего пользователя (только не истёкшие; истёкшие удаляются фоново раз в час)",
                 "auth": "Bearer",
                 "cookies": ["refreshToken (для пометки current)", "необязательно"],
-                "response": "SessionResponse[] { id: UUID, ip: string, city: string, userAgent: string, createdAt: Instant, expiresAt: Instant, rememberMe: boolean, current: boolean }"
+                "response": "SessionResponse[] { id: UUID, ip: string, city: string, userAgent: string, createdAt: Instant, expiresAt: Instant, rememberMe: boolean, current: boolean }",
+                "responses": [
+                    { "status": 200, "description": "SessionResponse[] — только не истёкшие сессии; текущая помечена current=true по совпадению с кукой refreshToken" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID (UUID.fromString) или ошибка БД" }
+                  ]
               },
               {
                 "method": "DELETE",
                 "path": "/api/v0/auth/sessions/{sessionId}",
-                "summary": "Завершить конкретную сессию по ID (текущую через этот эндпоинт удалить нельзя)",
+                "summary": "Завершить конкретную сессию по ID (с refreshToken текущая сессия не удаляется; без куки удаляется запрошенная сессия без защиты текущей)",
                 "auth": "Bearer",
                 "pathParams": { "sessionId": "UUID" },
-                "cookies": ["refreshToken (для исключения текущей сессии)"],
-                "response": "204 No Content"
+                "cookies": ["refreshToken (необязательно — защищает текущую сессию от удаления)"],
+                "response": "204 No Content",
+                "responses": [
+                    { "status": 204, "description": "Сессия удалена. Тело пустое. ВАЖНО: несуществующий или чужой sessionId НЕ даёт 404 — JPQL DELETE удаляет 0 строк и запрос тихо отвечает 204. С кукой текущая сессия защищена условием token <> currentToken." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "sessionId не разбирается как UUID (MethodArgumentTypeMismatchException) или ошибка БД" }
+                  ]
               },
               {
                 "method": "DELETE",
@@ -202,7 +362,12 @@
                 "summary": "Завершить все сессии кроме текущей (выход со всех устройств)",
                 "auth": "Bearer",
                 "cookies": ["refreshToken (необязательно)"],
-                "response": "204 No Content"
+                "response": "204 No Content",
+                "responses": [
+                    { "status": 204, "description": "Все сессии кроме текущей удалены. Тело пустое. ВАЖНО: без куки refreshToken удаления НЕ происходит, но ответ всё равно 204." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -215,14 +380,24 @@
                 "path": "/api/v0/status/hello",
                 "summary": "Проверка работоспособности",
                 "auth": "Bearer",
-                "response": "200 OK 'hello'"
+                "response": "200 OK 'hello'",
+                "responses": [
+                    { "status": 200, "description": "Сырая строка \"hello\" — String не оборачивается в ApiResponse" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway authFilter: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 401, "code": "Unauthorized", "body": "raw", "when": "прямой вызов сервиса без JWT: JwtAuthenticationEntryPoint отдаёт сырой {error, message} без code" }
+                  ]
               },
               {
                 "method": "GET",
                 "path": "/api/v0/status/me",
                 "summary": "Данные текущего пользователя из заголовков Gateway",
                 "auth": "Bearer",
-                "response": "{ userId: string, roles: string[], source: string }"
+                "response": "{ userId: string, roles: string[], source: string }",
+                "responses": [
+                    { "status": 200, "description": "{ userId, roles[], source: \"Gateway Headers\" } — Map оборачивается в ApiResponse.success" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway authFilter: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 401, "code": "Unauthorized", "body": "raw", "when": "прямой вызов сервиса без JWT и без заголовка X-User-Id" }
+                  ]
               }
             ]
           },
@@ -236,14 +411,19 @@
                 "path": "/users/check-me",
                 "summary": "Проверить свои роли (authorities)",
                 "auth": "Bearer (напрямую в сервис)",
-                "response": "string"
+                "response": "string",
+                "responses": [
+                    { "status": 200, "description": "Сырая строка \"Your authorities: [ROLE_USER]\" — String не оборачивается в ApiResponse. Эндпоинт не проксируется через gateway." },
+                    { "status": 401, "code": "Unauthorized", "body": "raw", "when": "прямой запрос в сервис без валидного Bearer: JwtAuthenticationEntryPoint отдаёт сырой {error, message} без code" }
+                  ]
               }
             ]
           },
           "BanController": {
             "tag": "Баны",
             "basePath": "/admin/bans",
-            "note": "НЕ проксируется через gateway (без /api/v0 маршрута); требует ROLE_ADMIN на сервисе",
+            "gatewayPattern": "/api/v0/admin/bans, /api/v0/admin/bans/**",
+            "note": "Проксируется через gateway: /api/v0/admin/bans (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе",
             "endpoints": [
               {
                 "method": "POST",
@@ -255,7 +435,16 @@
                   "reason": { "type": "string", "required": true },
                   "expiresAt": { "type": "ISO-8601 Instant", "required": false, "description": "null = бессрочный бан" }
                 },
-                "response": "201 Created BanResponse"
+                "response": "201 Created BanResponse",
+                "responses": [
+                    { "status": 201, "description": "BanResponse (id, userId, email, type=MANUAL, reason, bannedBy, createdAt, expiresAt, active)" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid CreateBanRequest: userId отсутствует или reason пустой" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN: SecurityConfig /admin/** требует hasRole(\"ADMIN\")" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пользователя с таким userId нет" },
+                    { "status": 409, "code": "BAN_ALREADY_ACTIVE", "when": "у пользователя уже есть активный бан" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "битый JSON, ошибка БД или subject токена не является UUID" }
+                  ]
               },
               {
                 "method": "POST",
@@ -263,14 +452,28 @@
                 "summary": "Разбанить (деактивировать бан)",
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Бан переведён в active=false. Тело пустое." },
+                    { "status": 400, "code": "BAN_ALREADY_INACTIVE", "when": "бан уже неактивен" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "бан с таким id не найден" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
                 "path": "/admin/bans",
                 "summary": "Все активные баны",
                 "auth": "Bearer",
-                "response": "BanResponse[]"
+                "response": "BanResponse[]",
+                "responses": [
+                    { "status": 200, "description": "BanResponse[] — все активные баны" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД или маппинга" }
+                  ]
               },
               {
                 "method": "GET",
@@ -278,7 +481,14 @@
                 "summary": "Активный бан пользователя",
                 "auth": "Bearer",
                 "pathParams": { "userId": "UUID" },
-                "response": "200 BanResponse | 204 если нет"
+                "response": "200 BanResponse | 204 если нет",
+                "responses": [
+                    { "status": 200, "description": "BanResponse активного бана пользователя" },
+                    { "status": 204, "description": "Активного бана нет — пустое тело. Несуществующий пользователь тоже даёт 204, а не 404." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
@@ -286,7 +496,13 @@
                 "summary": "История банов пользователя",
                 "auth": "Bearer",
                 "pathParams": { "userId": "UUID" },
-                "response": "BanResponse[]"
+                "response": "BanResponse[]",
+                "responses": [
+                    { "status": 200, "description": "BanResponse[] — история банов пользователя, включая неактивные. Несуществующий пользователь даёт пустой массив, а не 404." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
@@ -294,7 +510,13 @@
                 "summary": "Проверить, забанен ли пользователь",
                 "auth": "Bearer",
                 "pathParams": { "userId": "UUID" },
-                "response": "boolean"
+                "response": "boolean",
+                "responses": [
+                    { "status": 200, "description": "boolean — есть ли активный бан. Истёкший по expiresAt бан деактивируется и даёт false" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
+                  ]
               }
             ]
           }
@@ -315,7 +537,13 @@
                 "path": "/api/v0/user/me",
                 "summary": "Получить профиль текущего пользователя",
                 "auth": "Bearer",
-                "response": "ProfileResponse (полная информация о профиле)"
+                "response": "ProfileResponse (полная информация о профиле)",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProfileResponse> — профиль текущего пользователя" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "профиля нет в user_profile (событие user.created ещё не обработано или профиль удалён)" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД или маппинга" }
+                  ]
               },
               {
                 "method": "PATCH",
@@ -329,7 +557,14 @@
                   "phone": { "type": "string", "required": false, "constraints": "11 цифр, начинается с 79" },
                   "position": { "type": "string", "required": false, "constraints": "2-50" }
                 },
-                "response": "ProfileResponse"
+                "response": "ProfileResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProfileResponse> — обновлённый профиль" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateProfileRequest: имя не кириллица или длина вне 2..50, телефон не 11 цифр начиная с 79, position 2..50" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "профиль пользователя отсутствует" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка сохранения в БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -338,7 +573,57 @@
                 "auth": "Bearer",
                 "contentType": "multipart/form-data",
                 "formParams": { "file": "JPEG/PNG изображение" },
-                "response": "ApiResponse<String> { success, data: avatarUrl }"
+                "response": "ApiResponse<String> { success, data: avatarUrl }",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<String> — публичный URL аватара в MinIO" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть \"file\" отсутствует" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "профиль отсутствует — проверка идёт до валидации файла" },
+                    { "status": 413, "code": "FILE_TOO_LARGE", "when": "файл больше 5 МБ (лимит контейнера 10 МБ, поэтому проверка достижима)" },
+                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не image/* и сигнатура файла не PNG/JPEG/GIF/WEBP" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен (MinioService бросает голый RuntimeException), ошибка БД или файл больше 10 МБ (лимит servlet-контейнера)" }
+                  ]
+              }
+            ]
+          },
+          "AdminUserController": {
+            "tag": "Админ: пользователи",
+            "basePath": "/admin/users",
+            "gatewayPattern": "/api/v0/admin/users, /api/v0/admin/users/**",
+            "note": "Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/admin/users",
+                "summary": "Список пользователей (пагинированный)",
+                "auth": "Bearer",
+                "queryParams": {
+                  "page": { "type": "int", "default": "0" },
+                  "limit": { "type": "int", "default": "20", "constraints": "1..100" },
+                  "search": { "type": "string", "required": false, "description": "Поиск по email, имени или фамилии" }
+                },
+                "response": "AdminUsersPage { items: ProfileResponse[], page, limit, total }",
+                "responses": [
+                    { "status": 200, "description": "AdminUsersPage { items, page, limit, total }. Некорректные page/limit санируются, а не дают 400." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN: user-service требует hasRole(\"ADMIN\") для /admin/**" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД или поиска" }
+                  ]
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/admin/users/{userId}",
+                "summary": "Профиль любого пользователя по ID",
+                "auth": "Bearer",
+                "pathParams": { "userId": "UUID" },
+                "response": "ProfileResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProfileResponse> — профиль указанного пользователя" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "профиля с таким userId нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
+                  ]
               }
             ]
           }
@@ -378,7 +663,13 @@
                   "businessHours": { "type": "object", "required": false, "fields": "BusinessHoursRequest" },
                   "brandProfile": { "type": "string", "description": "Брендбук как JSON-строка (рынок, SWOT, услуги, цели, тон)", "required": false, "constraints": "max 100000" }
                 },
-                "response": "ProjectResponse"
+                "response": "ProjectResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProjectResponse> — созданный проект. Квота проектов здесь НЕ инкрементится, 402 невозможен. Событие project.created публикуется в RabbitMQ (best-effort)." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ProjectRequest: name 2..100, industry и toneOfVoice обязательны, city max 50, description max 2000, targetAudience max 500, brandProfile max 100000; каскадом socialLinks.instagram без https:// и businessHours с close<=open" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при сохранении проекта" }
+                  ]
               },
               {
                 "method": "GET",
@@ -386,14 +677,25 @@
                 "summary": "Получить проект по ID",
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
-                "response": "ProjectResponse"
+                "response": "ProjectResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProjectResponse> — проект по id" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден ИЛИ принадлежит другому пользователю (findByIdAndOwnerId) — чужой проект намеренно выглядит как отсутствующий" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
                 "path": "/api/v0/projects",
                 "summary": "Получить свои проекты",
                 "auth": "Bearer",
-                "response": "ProjectResponse[]"
+                "response": "ProjectResponse[]",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProjectResponse[]> — все проекты пользователя. Пустой массив, а не 404." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при выборке" }
+                  ]
               },
               {
                 "method": "PATCH",
@@ -412,7 +714,14 @@
                   "businessHours": { "type": "object", "required": false },
                   "brandProfile": { "type": "string", "description": "Брендбук как JSON-строка", "required": false, "constraints": "max 100000" }
                 },
-                "response": "ProjectResponse"
+                "response": "ProjectResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProjectResponse> — частично обновлённый проект" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateProjectRequest: нарушены ограничения size/pattern (те же, что и при создании)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому владельцу" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при сохранении" }
+                  ]
               },
               {
                 "method": "POST",
@@ -422,7 +731,16 @@
                 "pathParams": { "id": "UUID" },
                 "contentType": "multipart/form-data",
                 "formParams": { "file": "JPEG/PNG изображение" },
-                "response": "string (url логотипа)"
+                "response": "string (url логотипа)",
+                "responses": [
+                    { "status": 200, "description": "Строка с путём логотипа projects/{id}/logo_xxxx.ext" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть \"file\" отсутствует" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому владельцу — проверка идёт до валидации файла" },
+                    { "status": 413, "code": "FILE_TOO_LARGE", "when": "файл больше 5 МБ. ВНИМАНИЕ: в business-service не задан spring.servlet.multipart.max-file-size, поэтому дефолт 1 МБ обрывает запрос раньше и приходит 500; 413 достижим при поднятом лимите контейнера" },
+                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не image/* и сигнатура не PNG/JPEG/GIF/WEBP" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен при загрузке (голый RuntimeException), ошибка БД или превышение servlet-лимита загрузки" }
+                  ]
               },
               {
                 "method": "DELETE",
@@ -430,7 +748,13 @@
                 "summary": "Удалить проект",
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Проект удалён, логотип стёрт из MinIO (best-effort), событие project.deleted опубликовано в RabbitMQ. Тело пустое." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому владельцу" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при удалении" }
+                  ]
               }
             ]
           }
@@ -451,7 +775,11 @@
                 "path": "/api/v0/tariffs",
                 "summary": "Все тарифы",
                 "auth": "public",
-                "response": "TariffResponse[]"
+                "response": "TariffResponse[]",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<TariffResponse[]> — публичный эндпоинт, gateway-роут без authFilter, в сервисе GET /tariffs/** permitAll" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при чтении тарифов" }
+                  ]
               },
               {
                 "method": "GET",
@@ -459,7 +787,12 @@
                 "summary": "Тариф по ID",
                 "auth": "public",
                 "pathParams": { "id": "UUID" },
-                "response": "TariffResponse"
+                "response": "TariffResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<TariffResponse> — публичный эндпоинт, 401/403 неприменимы" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -476,7 +809,13 @@
                   "analyticsType": { "type": "AnalyticsType enum", "required": true },
                   "aiGenerations": { "type": "int", "required": true }
                 },
-                "response": "201 Created TariffResponse"
+                "response": "201 Created TariffResponse",
+                "responses": [
+                    { "status": 201, "description": "ApiResponse<TariffResponse> — созданный тариф" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid CreateTariffRequest: пустое name, cost null/отрицательный, chatBotType/supportType/analyticsType null, projects/posts/aiGenerations отрицательные" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "gateway-роут /api/v0/tariffs/** публичный и НЕ пробрасывает X-User-Id, а в billing-service для не-GET действует anyRequest().authenticated() → аноним получает 403. ВНИМАНИЕ: даже с валидным Bearer эндпоинт практически недоступен, ROLE_ADMIN в коде не проверяется" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "нарушение уникальности tariffs.name (DataIntegrityViolationException) или ошибка БД" }
+                  ]
               },
               {
                 "method": "PUT",
@@ -494,7 +833,14 @@
                   "analyticsType": { "type": "AnalyticsType enum", "required": false },
                   "aiGenerations": { "type": "Integer", "required": false }
                 },
-                "response": "TariffResponse"
+                "response": "TariffResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<TariffResponse> — обновлённый тариф" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateTariffRequest: cost/projects/posts/aiGenerations отрицательные" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "анонимный запрос отклоняется SecurityFilterChain billing-service (публичный gateway-роут не передаёт X-User-Id); ROLE_ADMIN не проверяется" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID, дубль tariffs.name или ошибка БД" }
+                  ]
               },
               {
                 "method": "DELETE",
@@ -502,7 +848,13 @@
                 "summary": "Удалить тариф",
                 "auth": "Bearer (authenticated; ROLE_ADMIN реально НЕ проверяется)",
                 "pathParams": { "id": "UUID" },
-                "response": "204 No Content"
+                "response": "204 No Content",
+                "responses": [
+                    { "status": 204, "description": "Тариф удалён. Тело пустое." },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "анонимный запрос отклоняется SecurityFilterChain billing-service; ROLE_ADMIN не проверяется" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID, нарушение FK (тариф используется подписками) или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -517,14 +869,27 @@
                 "summary": "Получить свою квоту по фиче",
                 "auth": "Bearer",
                 "queryParams": { "feature": { "type": "string", "default": "generation", "required": false } },
-                "response": "CheckQuotaResponse"
+                "response": "CheckQuotaResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<CheckQuotaResponse> по фиче (по умолчанию generation, requested=1). Исчерпанная квота — НЕ ошибка: allowed=false при 200." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "нет тарифа FREE для автоназначения или тариф подписки удалён" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
                 "path": "/api/v0/quota/me/tariff",
                 "summary": "Свой тариф и квоты по всем фичам",
                 "auth": "Bearer",
-                "response": "SubscriptionOverview | 404"
+                "response": "SubscriptionOverview | 404",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<SubscriptionOverview> с квотами project/post/generation" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": null, "body": "empty", "when": "у пользователя нет подписки: сервис возвращает ResponseEntity.notFound() — пустое тело, error.code отсутствует" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "подписка есть, но её тариф удалён из tariffs" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -534,7 +899,14 @@
                 "requestBody": {
                   "tariffId": { "type": "UUID", "required": true }
                 },
-                "response": "SubscriptionOverview"
+                "response": "SubscriptionOverview",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<SubscriptionOverview> — подписка на тариф оформлена (mock-покупка), счётчики обнулены" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid PurchaseTariffRequest: tariffId отсутствует" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким tariffId нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -549,7 +921,14 @@
                 "summary": "Выдать пользователю тариф (админ)",
                 "auth": "Bearer (admin)",
                 "pathParams": { "userId": "UUID", "tariffId": "UUID" },
-                "response": "SubscriptionResponse"
+                "response": "SubscriptionResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<SubscriptionResponse> — подписка выдана, счётчики обнулены. Отсутствие пользователя ошибкой не является." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN: /admin/** требует hasRole(\"ADMIN\") в billing-service" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким tariffId нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId или tariffId не разбираются как UUID, либо ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
@@ -557,7 +936,14 @@
                 "summary": "Подписка пользователя (админ)",
                 "auth": "Bearer (admin)",
                 "pathParams": { "userId": "UUID" },
-                "response": "SubscriptionResponse | 404"
+                "response": "SubscriptionResponse | 404",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<SubscriptionResponse> — подписка пользователя" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": null, "body": "empty", "when": "у пользователя нет подписки: ResponseEntity.notFound() — пустое тело, error.code отсутствует" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -576,7 +962,13 @@
                   "feature": { "type": "string", "required": true },
                   "requested": { "type": "int", "required": true }
                 },
-                "response": "CheckQuotaResponse"
+                "response": "CheckQuotaResponse",
+                "responses": [
+                    { "status": 200, "description": "CheckQuotaResponse — СЫРОЕ тело без обёртки ApiResponse: путь /internal/** исключён из GlobalResponseHandler (raw-body S2S-контракт). Внутренний эндпоинт, через gateway не проксируется." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid CheckQuotaRequest: userId отсутствует или feature пустой" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "у пользователя нет тарифа FREE либо тариф подписки удалён. Неизвестная feature ошибкой НЕ является: лимит 0, allowed=false" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -584,7 +976,13 @@
                 "summary": "Инкрементировать использование",
                 "auth": "internal",
                 "pathParams": { "userId": "UUID", "feature": "string" },
-                "response": "200 OK"
+                "response": "200 OK",
+                "responses": [
+                    { "status": 200, "description": "Счётчик использования увеличен, тело пустое (raw S2S-контракт). Единственный эндпоинт этих сервисов, который инкрементит квоту и потому единственный, где возможен 402." },
+                    { "status": 402, "code": "PAYMENT_REQUIRED", "when": "тариф платный (cost > 0), подписка есть, но не оплачена за текущий месяц" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "нет тарифа FREE для автоназначения или тариф подписки отсутствует" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД при инкременте" }
+                  ]
               }
             ]
           }
@@ -618,7 +1016,32 @@
                   "currentMonth": { "type": "string", "required": false },
                   "currentYear": { "type": "int", "required": false }
                 },
-                "response": "202 Accepted AsyncGenerateResponse { taskId }"
+                "response": "202 Accepted AsyncGenerateResponse { taskId }",
+                "responses": [
+                    { "status": 202, "description": "AsyncGenerateResponse { taskId, status: PROCESSING }. Вызов Единого Шлюза уходит в фоновый пул: его ошибка НЕ превращается в HTTP-ошибку, а ставит задаче статус FAILED (читать через GET /orchestration/tasks/{taskId}). Если sync-ответ Шлюза уже содержит текст, посты создаются сразу и задача сразу COMPLETED." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid GenerateRequest: projectId отсутствует, mode отсутствует, count < 1; либо бизнес-проверка validateRequest: MANUAL без prompt, либо AUTO без industry/description/toneOfVoice" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД при сохранении задачи" }
+                  ]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/generate/async (multipart)",
+                "summary": "Асинхронная генерация с фотографиями: multipart/form-data, часть 'request' = JSON GenerateRequest, часть 'files' = бинарные файлы. Файлы грузятся в MinIO (best-effort, при ошибке attachments=[]), в payload уходят attachments [{name, url}] — Moondream VQA на стороне Шлюза",
+                "auth": "Bearer",
+                "contentType": "multipart/form-data",
+                "formParams": {
+                  "request": { "type": "JSON GenerateRequest", "required": true },
+                  "files": { "type": "MultipartFile[]", "required": false, "description": "Фотографии для анализа" }
+                },
+                "response": "202 Accepted AsyncGenerateResponse { taskId }",
+                "responses": [
+                    { "status": 202, "description": "AsyncGenerateResponse { taskId, status: PROCESSING }. Файлы загружены в MinIO best-effort: при ошибке загрузки attachments=[] и генерация идёт без фото, HTTP-ошибки не будет (в отличие от синхронного /posts/generate)." },
+                    { "status": 400, "code": "MISSING_FILE", "when": "обязательная multipart-часть \"request\" отсутствует. Часть \"files\" опциональна (required=false) и её отсутствие ошибки не даёт." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid на части \"request\": projectId отсутствует, mode отсутствует, count < 1; либо validateRequest: MANUAL без prompt / AUTO без industry+description+toneOfVoice" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "файл выше лимита multipart (MaxUploadSizeExceededException не имеет отдельного обработчика), subject не UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
@@ -626,7 +1049,13 @@
                 "summary": "Проверить статус выполнения задачи",
                 "auth": "Bearer",
                 "pathParams": { "taskId": "UUID" },
-                "response": "TaskStatusResponse"
+                "response": "TaskStatusResponse",
+                "responses": [
+                    { "status": 200, "description": "TaskStatusResponse { status: PROCESSING|COMPLETED|FAILED, errorMessage, postId/resultPostId, generatedText }. Чистое чтение БД: ни квот, ни внешних вызовов." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "задачи с таким taskId нет в БД. ВНИМАНИЕ: проверки владельца нет — любой авторизованный пользователь видит чужую задачу." },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "taskId не разбирается как UUID (MethodArgumentTypeMismatchException) или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -642,7 +1071,13 @@
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
                 "response": "CriticReviewResponse { status, critic, data, error }",
-                "note": "Возвращает правки/замечания для улучшения; применение правок — через PATCH posts/{id}"
+                "note": "Возвращает правки/замечания для улучшения; применение правок — через PATCH posts/{id}",
+                "responses": [
+                    { "status": 200, "description": "CriticReviewResponse { status, critic, data, error } — аудит поста критиком Чарли Мангера. Правки применяются клиентом через PATCH /orchestration/posts/{id}." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю (requireOwned)" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "контур критика ответил не-2xx (CriticClient бросает IllegalStateException со статусом) или недоступен; также subject не UUID" }
+                  ]
               },
               {
                 "method": "PATCH",
@@ -658,15 +1093,50 @@
                   "scheduledAt": { "type": "ISO-8601 Instant", "required": false }
                 },
                 "response": "PostResponse",
-                "note": "Владельцем считается пользователь, чей userId совпадает с userId поста"
+                "note": "Владельцем считается пользователь, чей userId совпадает с userId поста",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — частично обновлённый пост (text, imageUrl, hashtags, targetPlatforms, scheduledAt)" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdatePostRequest: нарушены ограничения на переданные поля" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
               },
               {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/media",
+                "summary": "Прикрепить медиа к посту: файл загружается в MinIO, imageUrl поста обновляется (только владелец)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "contentType": "multipart/form-data",
+                "formParams": {
+                  "file": { "type": "MultipartFile", "required": true, "description": "Изображение для поста" }
+                },
+                "response": "PostResponse",
+                "note": "Файл кладётся в бакет generative-orchestration по ключу media/{projectId}/{filename} (sanitize от path-traversal); публичный URL доступен через gateway-роут /s3/**",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — пост с обновлённым imageUrl" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть \"file\" отсутствует" },
+                    { "status": 400, "code": "EMPTY_MEDIA_FILE", "when": "файл передан, но пустой (0 байт)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю — проверка идёт до валидации файла" },
+                    { "status": 502, "code": "MEDIA_UPLOAD_FAILED", "when": "MinIO вернул пустой результат: uploaded.isEmpty() после попытки загрузки" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен (голый RuntimeException из MediaStorageService), файл выше лимита multipart или ошибка БД" }
+                  ]
+              },
+{
                 "method": "POST",
                 "path": "/api/v0/orchestration/posts/{id}/confirm",
                 "summary": "Подтвердить пост (только владелец)",
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
-                "response": "PostResponse"
+                "response": "PostResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — пост подтверждён (статус CONFIRMED)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "POST",
@@ -674,15 +1144,94 @@
                 "summary": "Опубликовать пост",
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
-                "response": "PostResponse"
+                "response": "PostResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — пост опубликован (PUBLISHED + publishedAt)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 502, "code": "AI_PUBLISH_ERROR", "when": "пост не отправлен в AI-контур: контур недоступен, таймаут или ответ без успеха (tryPublishViaContour вернул false)" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
               },
               {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/republish",
+                "summary": "Переопубликовать пост: создаётся НОВЫЙ пост с новым id (копия содержимого) и публикуется (только владелец)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "PostResponse",
+                "note": "Сделано вместо повторной отправки того же поста — та создавала дубликат в канале при неизменной записи в БД. Исходный пост остаётся в БД без изменений. Переопубликовать можно только пост в статусе PUBLISHED.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — новый опубликованный пост (новый id, проставлен publishedAt)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_NOT_PUBLISHED", "when": "исходный пост не в статусе PUBLISHED — перепубликовать нечего" },
+                    { "status": 502, "code": "AI_PUBLISH_ERROR", "when": "новый пост не отправлен в AI-контур: контур недоступен, таймаут или ответ без успеха" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
+              },
+{
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/schedule",
+                "summary": "Запланировать публикацию: статус SCHEDULED + scheduledAt; крон-планировщик публикует, когда scheduledAt <= now",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "requestBody": {
+                  "scheduledAt": { "type": "ISO-8601 Instant", "required": true }
+                },
+                "response": "PostResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — пост поставлен в SCHEDULED со scheduledAt. Фактическую публикацию выполняет PostPublishScheduler (тик каждые 30с)." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid SchedulePostRequest: scheduledAt отсутствует" },
+                    { "status": 400, "code": "INVALID_SCHEDULED_DATE", "when": "scheduledAt не в будущем (requireFuture)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/{id}/reject",
+                "summary": "Отложить пост (статус REJECTED)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "PostResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — пост отклонён (REJECTED). Это и есть действие «отложить» на фронте." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/orchestration/posts/{id}",
+                "summary": "Удалить неопубликованный пост (DRAFT, SCHEDULED, REJECTED; только владелец)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "204 No Content (тело пустое)",
+                "note": "Каскадно удаляет post_statistics и проектные медиа в MinIO по media/{projectId}/** (best-effort по объекту). Опубликованный пост удалить нельзя. Чужой пост отдаётся как 404, а не 403 — по аналогии с остальными эндпоинтами, чтобы не подтверждать существование чужого поста.",
+                "responses": [
+                    { "status": 204, "description": "Пост удалён. Тело пустое." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_ALREADY_PUBLISHED", "when": "пост в статусе PUBLISHED — удаление запрещено" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
+              },
+{
                 "method": "GET",
                 "path": "/api/v0/orchestration/posts/{id}",
                 "summary": "Получить пост по ID",
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
-                "response": "PostResponse"
+                "response": "PostResponse",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — пост по id" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
               },
               {
                 "method": "GET",
@@ -690,7 +1239,12 @@
                 "summary": "Посты проекта",
                 "auth": "Bearer",
                 "pathParams": { "projectId": "UUID" },
-                "response": "PostResponse[]"
+                "response": "PostResponse[]",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse[]> — посты проекта, сортировка по createdAt DESC. Нет постов — пустой массив, а не 404." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "projectId не разбирается как UUID (MethodArgumentTypeMismatchException) или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -709,7 +1263,7 @@
                   "prompt": { "type": "string", "required": true },
                   "companyName": { "type": "string", "required": false },
                   "niche": { "type": "string", "required": false },
-                  "attachments": { "type": "string[]", "description": "S3/MinIO URLs", "required": false },
+                  "attachments": { "type": "Attachment[]", "description": "Файлы вложений { name, url } — публичные S3/MinIO URL; пустой список = генерация без медиа", "required": false },
                   "promoCode": { "type": "string", "required": false },
                   "format": { "type": "string", "description": "POST | VIDEO", "required": false },
                   "toneOfVoice": { "type": "string", "description": "override тональности, напр. WARM", "required": false },
@@ -720,7 +1274,39 @@
                   "targetActionLink": { "type": "string", "required": false }
                 },
                 "response": "PostResponse",
-                "errorResponses": "402 PAYMENT_REQUIRED QUOTA_EXCEEDED (исчерпана квота 'post'); 502 AI_GENERATION_FAILED"
+                "errorResponses": "402 PAYMENT_REQUIRED QUOTA_EXCEEDED (исчерпана квота 'post'); 502 AI_GENERATION_FAILED",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — создан пост в статусе DRAFT; квота feature \"post\" проверена и списана" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid AiGenerateRequest: projectId отсутствует или prompt пустой/бланк" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 402, "code": "QUOTA_EXCEEDED", "when": "исчерпана квота feature \"post\" (billing вернул allowed=false). Недоступность billing-service тоже трактуется как запрет." },
+                    { "status": 502, "code": "ORCHESTRATOR_ERROR", "when": "Единый Шлюз недоступен: таймаут, connect-ошибка, пустое или невалидное тело ответа" },
+                    { "status": 502, "code": "AI_GENERATION_FAILED", "when": "Шлюз ответил, но status != success (текст ошибки контура попадает в message)" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД при сохранении поста" }
+                  ]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/posts/generate",
+                "summary": "Сгенерировать пост с медиа: multipart/form-data, часть 'request' = JSON AiGenerateRequest, часть 'files' = бинарные файлы. Файлы сохраняются в MinIO (бакет generative-orchestration, ключ media/{projectId}/...), в payload оркестратора уходят как attachments [{name, url}] с публичными URL",
+                "auth": "Bearer",
+                "contentType": "multipart/form-data",
+                "formParams": {
+                  "request": { "type": "JSON", "description": "AiGenerateRequest (проект, промпт, опции)" },
+                  "files": { "type": "MultipartFile[]", "description": "Бинарные файлы вложений" }
+                },
+                "response": "PostResponse",
+                "note": "Пустой список files/attachments — поведение как у обычного /generate",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> — файлы сохранены в MinIO (media/{projectId}/...), attachments [{name, url}] ушли в payload Шлюза; пустые или нечитаемые files дают поведение как у обычного /generate" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "обязательная multipart-часть \"request\" или \"files\" отсутствует" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid на части \"request\": projectId отсутствует или prompt пустой" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 402, "code": "QUOTA_EXCEEDED", "when": "исчерпана квота feature \"post\"" },
+                    { "status": 502, "code": "ORCHESTRATOR_ERROR", "when": "Единый Шлюз недоступен, таймаут или невалидный ответ" },
+                    { "status": 502, "code": "AI_GENERATION_FAILED", "when": "Шлюз ответил со status != success" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен (MediaStorageService бросает голый RuntimeException), превышен лимит multipart или ошибка БД" }
+                  ]
               }
             ]
           },
@@ -740,29 +1326,185 @@
                   "payload": { "type": "object", "required": false },
                   "syncBackend": { "type": "boolean", "required": false, "default": false }
                 },
-                "response": "OrchestratorResponse { status, task_type, user_id, session_id, data, timings, error }"
+                "response": "OrchestratorResponse { status, task_type, user_id, session_id, data, timings, error }",
+                "responses": [
+                    { "status": 200, "description": "Сырой ответ Единого Шлюза { status, task_type, session_id, data, timings, error }. Ответ со status != success тоже отдаётся как 200, БЕЗ исключения. brand_id подставляется в payload." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid AiExecuteRequest: taskType пустой (@NotBlank) или payload отсутствует (@NotNull)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 502, "code": "ORCHESTRATOR_ERROR", "when": "Единый Шлюз недоступен: connect/read-таймаут, пустое тело или нечитаемый JSON" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID" }
+                  ]
               }
             ]
           },
           "AiCallbackController": {
             "tag": "AI callback (входящий от AI-сервера)",
             "basePath": "/api/v1/ai",
-            "note": "Публичный маршрут gateway /api/v1/ai/**; JWT НЕ требуется — проверяется заголовок X-Internal-Secret (constant-time)",
+            "note": "Публичный маршрут gateway /api/v1/ai/**; JWT НЕ требуется — проверяется заголовок X-Internal-Secret (constant-time). Обработка: generate_post → session_id=taskId (async-задача) создаёт пост и переводит задачу в COMPLETED (идемпотентно: COMPLETED/FAILED пропускается); иначе legacy session_id=projectId → пост DRAFT. quick_scan/analyze_documents/onboard_user/onboarding → session_id=sessionId анализа бизнеса, результат завершает анализ (BusinessAnalysisService.complete)",
             "endpoints": [
               {
                 "method": "POST",
                 "path": "/api/v1/ai/callback",
-                "summary": "Webhook: AI-сервер пушит результат (auto-push при sync_backend=true; generate_post → Post DRAFT, session_id = projectId)",
+                "summary": "Webhook: AI-сервер пушит результат (auto-push при sync_backend=true). generate_post → Post DRAFT (session_id=taskId для async-задач, projectId для legacy sync); quick_scan/analyze_documents/onboard_user/onboarding → завершение анализа бизнеса",
                 "auth": "X-Internal-Secret header",
                 "requestBody": {
                   "user_id": { "type": "UUID", "required": false },
-                  "session_id": { "type": "UUID", "required": false, "description": "projectId" },
+                  "session_id": { "type": "UUID", "required": false, "description": "taskId для async-задачи generate_post; projectId для legacy sync; sessionId для анализа бизнеса" },
                   "task_type": { "type": "string", "required": false },
                   "status": { "type": "string", "required": false },
                   "result": { "type": "object", "required": false },
                   "timestamp": { "type": "string", "required": false }
                 },
-                "response": "ApiResponse"
+                "response": "ApiResponse",
+                "responses": [
+                    { "status": 200, "description": "{ status: \"accepted\" }. task_type generate_post → создан пост DRAFT и задача переведена в COMPLETED (идемпотентно: COMPLETED/FAILED пропускается); quick_scan / analyze_documents / onboard_user / onboarding → анализ бизнеса COMPLETED. Ответ со status != success или с неизвестным task_type тоже 200, только запись в лог." },
+                    { "status": 401, "code": "INVALID_INTERNAL_SECRET", "when": "заголовок X-Internal-Secret отсутствует или не совпадает с настроенным ai.internal-secret (сравнение MessageDigest.isEqual). JWT не нужен — маршрут публичный." },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "тело нечитаемо или отсутствует (битый JSON — биндинг происходит ДО проверки секрета) либо ошибка БД при сохранении поста/задачи/анализа" }
+                  ]
+              }
+            ]
+          },
+          "BusinessAnalysisController": {
+            "tag": "Анализ бизнеса (онбординг)",
+            "basePath": "/orchestration/analysis",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/analysis",
+                "summary": "Запустить анализ бизнеса (ссылка/документы/заметки). Синхронный вызов Единого Шлюза (task_type: quick_scan при url, analyze_documents при только документах, onboard_user иначе); на ошибку/таймаут анализ помечается FAILED без исключения. Результат также может прийти асинхронно пушем на /api/v1/ai/callback",
+                "auth": "Bearer",
+                "requestBody": {
+                  "companyName": { "type": "string", "required": false, "constraints": "max 100" },
+                  "url": { "type": "string", "required": false, "constraints": "max 2000" },
+                  "notes": { "type": "string", "required": false, "constraints": "max 10000" },
+                  "projectId": { "type": "UUID", "required": false },
+                  "documents": { "type": "string[]", "required": false, "description": "data-URL документов (PDF/DOCX/PPTX/TXT/CSV...), max 10 шт по 2 МБ" }
+                },
+                "response": "AnalysisResponse { id, sessionId, taskType, status, profile, result, error }",
+                "responses": [
+                    { "status": 200, "description": "AnalysisResponse { sessionId, taskType (quick_scan / analyze_documents / onboard_user), status (PENDING / COMPLETED / FAILED), profile, result }. Недоступность и таймаут Шлюза запрос НЕ роняют: анализ помечается FAILED в теле, ошибка в errorMessage." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid AnalysisRequest: companyName > 100, url > 2000, notes > 10000, documents > 10 штук или один документ > 2 000 000 символов" },
+                    { "status": 400, "code": "ANALYSIS_EMPTY_INPUT", "when": "не передан ни url, ни documents, ни notes" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/orchestration/analysis/{id}",
+                "summary": "Получить результат анализа",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "AnalysisResponse",
+                "responses": [
+                    { "status": 200, "description": "AnalysisResponse найденного анализа (поиск по sessionId И userId)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "анализа с таким sessionId для этого пользователя нет — включая чужие данные" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "SocialVerificationController": {
+            "tag": "Верификация соцсетей (онбординг)",
+            "basePath": "/orchestration/socials",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/socials/verify",
+                "summary": "Проверить ссылку/канал соцсети. Telegram: Bot API getChat при TELEGRAM_BOT_TOKEN, иначе best-effort публичная страница t.me; vk/ok/max/instagram/zen/rutube/avito — HTTP reachability 2xx/3xx (SSRF-защита: приватные/локальные адреса отклоняются); остальные каналы — UNSUPPORTED_CHANNEL",
+                "auth": "Bearer",
+                "requestBody": {
+                  "channel": { "type": "string", "required": true, "description": "telegram, vk, ok, max, instagram, zen, rutube, avito" },
+                  "reference": { "type": "string", "required": true, "description": "Ссылка на страницу или @хендл канала" }
+                },
+                "response": "SocialVerifyResponse { channel, reference, verified, provider, error }",
+                "note": "verified=true означает только «страница/канал существует»; права на публикацию дают реальные коннекторы (этап B)",
+                "responses": [
+                    { "status": 200, "description": "SocialVerifyResponse { channel, reference, verified, provider, error }. ВАЖНО: HTTP-статус ВСЕГДА 200, включая все проверочные сбои — тогда verified=false, а причина в поле error: UNSUPPORTED_CHANNEL, INVALID_TELEGRAM_HANDLE, TELEGRAM_PAGE_NOT_FOUND_OR_OFFLINE, TELEGRAM_CHAT_NOT_FOUND_OR_PUBLIC_CHAT_ONLY, TELEGRAM_API_UNAVAILABLE, UNSAFE_URL, PAGE_NOT_REACHABLE_OR_BLOCKED. verified=true означает лишь «страница/канал существует», а не наличие прав на публикацию." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid SocialVerifyRequest: channel или reference пустой" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "необработанное исключение (внутри verify сетевые ошибки превращаются в verified:false, поэтому 500 маловероятен)" }
+                  ]
+              }
+            ]
+          },
+          "ChannelAnalysisController": {
+            "tag": "Анализ Telegram-канала",
+            "basePath": "/orchestration/channel",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "note": "Гейт: проект ищется в business-service, у проекта должен быть привязан socialLinks.telegram, и channel запроса должен совпадать с привязанным (иначе 400 CHANNEL_NOT_BOUND). Посты импортируются PUBLISHED с targetPlatforms=telegram, метрики → post_statistics; объекции → RAG channel_context:{projectId}. Все запросы принимают JWT (userId из principal).",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/channel/analyze",
+                "summary": "Запустить анализ Telegram-канала (parse_telegram через Шлюз, sync-backend; импорт постов + статистика)",
+                "auth": "Bearer",
+                "requestBody": {
+                  "projectId": { "type": "UUID", "required": true },
+                  "channel": { "type": "string", "required": true, "description": "@хендл канала, должен совпадать с привязанным socialLinks.telegram" },
+                  "limit": { "type": "int", "required": false, "default": "10", "constraints": "1..50" },
+                  "includeMediaVqa": { "type": "boolean", "required": false, "default": "true" }
+                },
+                "response": "ChannelAnalysisResponse { id, sessionId, projectId, channel, status, posts: ChannelPostDto[], objections: string[], channelInfo, result, error }",
+                "status": "200 OK (sync-ответ Шлюза может вернуть уже готовый результат или COMPLETED/PROCESSING)",
+                "responses": [
+                    { "status": 200, "description": "ChannelAnalysisResponse — анализ запущен/завершён. Результат импортируется идемпотентно по externalId: посты в статусе PUBLISHED с targetPlatforms=[telegram], метрики views/forwards/comments → post_statistics, возражения → RAG-документ channel_context:{projectId}." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ChannelAnalyzeRequest: projectId, channel или limit вне диапазона" },
+                    { "status": 400, "code": "CHANNEL_NOT_BOUND", "when": "у проекта не заполнен socialLinks.telegram ИЛИ поле channel запроса не совпадает с нормализованным привязанным каналом. Гейт намеренно блокирует анализ «чужих» каналов." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/orchestration/channel/analysis/{id}",
+                "summary": "Получить результат анализа канала",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "ChannelAnalysisResponse",
+                "responses": [
+                    { "status": 200, "description": "ChannelAnalysisResponse — результат анализа канала" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "анализа с таким id нет или он принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/orchestration/channel/settings",
+                "summary": "Настройки автоскана канала проекта (интервал часов, время последнего скана)",
+                "auth": "Bearer",
+                "queryParams": { "projectId": { "type": "UUID", "required": true } },
+                "response": "ChannelSettingsResponse { projectId, autoRescanIntervalHours, lastRescanAt }",
+                "responses": [
+                    { "status": 200, "description": "ChannelSettingsResponse { autoRescanIntervalHours, lastRescanAt } — текущие настройки автоскана проекта" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "обязательный query-параметр projectId отсутствует или не разбирается как UUID" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PUT",
+                "path": "/api/v0/orchestration/channel/settings",
+                "summary": "Обновить интервал автоскана канала",
+                "auth": "Bearer",
+                "queryParams": { "projectId": { "type": "UUID", "required": true } },
+                "requestBody": {
+                  "autoRescanIntervalHours": { "type": "int", "required": true, "constraints": "1..168" }
+                },
+                "response": "ChannelSettingsResponse",
+                "responses": [
+                    { "status": 200, "description": "ChannelSettingsResponse — интервал автоскана сохранён" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "обязательный query-параметр projectId отсутствует; либо @Valid ChannelSettingsRequest: autoRescanIntervalHours вне диапазона 1..168" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому пользователю" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
               }
             ]
           }
