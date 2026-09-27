@@ -17,6 +17,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   rabbitmq:
     image: rabbitmq:3-management
@@ -39,9 +40,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/minio
     container_name: minio
     environment:
       MINIO_ROOT_USER: admin
@@ -58,9 +60,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: minio-init
     depends_on:
       minio:
