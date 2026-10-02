@@ -207,3 +207,7 @@ ucust-dev/
 ├── docker-compose.local.yml  # Локальная разработка (всё вместе)
 └── .env                      # Локальные секреты (в .gitignore)
 ```
+
+PROPRIETARY AND CONFIDENTIAL.
+Unauthorized use, copying, distribution, or commercialization is prohibited.
+See LICENSE.
