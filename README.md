@@ -208,6 +208,9 @@ ucust-dev/
 └── .env                      # Локальные секреты (в .gitignore)
 ```
 
-PROPRIETARY AND CONFIDENTIAL.
-Unauthorized use, copying, distribution, or commercialization is prohibited.
+
+---
+
+PROPRIETARY AND CONFIDENTIAL.</br>
+Unauthorized use, copying, distribution, or commercialization is prohibited.</br>
 See LICENSE.
