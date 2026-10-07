@@ -231,7 +231,7 @@
                 "response": "200 OK",
                 "responses": [
                     { "status": 200, "description": "Пароль изменён, все активные сессии сброшены. Тело пустое." },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ResetPasswordRequest: новый пароль короче 6 символов, пустой токен или неверный формат email" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ResetPasswordRequest: новый пароль вне 8..50 символов, не проходит PasswordPolicy (нужны заглавная/строчная латинские, цифра и спецсимвол, пробелы и не-ASCII запрещены), пустой токен, confirmPassword пуст или не совпадает с newPassword (@PasswordMatch)" },
                     { "status": 404, "code": "NOT_FOUND", "when": "пользователь по токену не найден" },
                     { "status": 410, "code": "TOKEN_EXPIRED", "when": "токен сброса пароля истёк" }
                   ]
@@ -246,10 +246,12 @@
                   "accessToken": { "type": "string", "required": true, "description": "Access token от Яндекс OAuth" }
                 },
                 "response": "JwtResponse { accessToken: string } + кука",
-                "responses": [
+"responses": [
                     { "status": 200, "description": "JwtResponse { accessToken } + Set-Cookie: refreshToken (rememberMe=true). Пользователь создаётся при первом входе." },
                     { "status": 401, "code": "Unauthorized", "body": "raw", "when": "прямой вызов сервиса без JWT: SecurityConfig не permitAll для этого пути, anyRequest().authenticated() → JwtAuthenticationEntryPoint пишет сырой {error, message} БЕЗ ApiResponse и без code" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "неверный или истёкший Yandex-токен: RestTemplate.exchange без error-handler → HttpClientErrorException (лог: '401 Unauthorized: ...'); также OAuthEmailAlreadyExistsException (RuntimeException, не BaseException — обработчика нет), пустой accessToken, ответ Яндекса без email или недоступность login.yandex.ru" }
+                    { "status": 400, "code": "OAUTH_EMAIL_NOT_PROVIDED", "when": "провайдер не отдал ни одного пригодного адреса и аккаунт ещё не привязан. Адрес берётся OAuth2EmailResolver: подтверждённый из emails[] → default_email → первый emails[] → email" },
+                    { "status": 409, "code": "OAUTH_EMAIL_ALREADY_EXISTS", "when": "адрес от провайдера уже занят другим способом входа — предлагается привязка" },
+                    { "status": 502, "code": "OAUTH_PROVIDER_ERROR", "when": "login.yandex.ru не ответил, таймаут (connect 3s / read 5s), ответ без id или пустое тело" }
                   ]
               },
               {
@@ -505,7 +507,7 @@
               {
                 "method": "GET",
                 "path": "/admin/bans/user/{userId}/check",
-                "summary": "Проверить, забанен ли пользователь",
+"summary": "Проверить, забанен ли пользователь",
                 "auth": "Bearer",
                 "pathParams": { "userId": "UUID" },
                 "response": "boolean",
@@ -513,6 +515,31 @@
                     { "status": 200, "description": "boolean — есть ли активный бан. Истёкший по expiresAt бан деактивируется и даёт false" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "AdminAccountController": {
+            "tag": "Админ: удаление аккаунта",
+            "basePath": "/admin/accounts",
+            "gatewayPattern": "/api/v0/admin/accounts, /api/v0/admin/accounts/**",
+            "note": "Отдельный префикс /admin/accounts, а не /admin/users: последний занят user-service (чтение профилей). Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе.",
+            "endpoints": [
+              {
+                "method": "DELETE",
+                "path": "/api/v0/admin/accounts/{userId}",
+                "summary": "Удалить пользователя (админ)",
+                "auth": "Bearer",
+                "pathParams": { "userId": "UUID" },
+                "response": "204 No Content",
+                "note": "Удаляет аккаунт, OAuth-идентичности, access/refresh-токены и баны. Событие user.deleted уходит в outbox только после коммита транзакции и каскадом чистит профиль+аватар (user-service), проекты (business-service), посты/задачи/анализы/медиа (generative-orchestration-service). RAG-документы контура остаются: у Шлюза v2.5.0 нет эндпоинта удаления из RAG-БД.",
+                "responses": [
+                    { "status": 204, "description": "Пользователь удалён. Ответ без тела." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "USER_NOT_FOUND", "when": "пользователя с таким id нет" },
+                    { "status": 409, "code": "CANNOT_DELETE_SELF", "when": "adminId == userId — нельзя удалить собственную учётную запись" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
                   ]
               }
@@ -746,7 +773,65 @@
                 "responses": [
                     { "status": 200, "description": "Проект удалён, логотип стёрт из MinIO (best-effort), событие project.deleted опубликовано в RabbitMQ. Тело пустое." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому владельцу" },
+{ "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому владельцу" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при удалении" }
+                  ]
+              }
+            ]
+          },
+          "AdminProjectController": {
+            "tag": "Админ: проекты",
+            "basePath": "/admin/projects",
+            "gatewayPattern": "/api/v0/admin/projects, /api/v0/admin/projects/**",
+            "note": "Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе. Поиск проекта идёт по findById без проверки ownerId, поэтому админ работает с проектами любых пользователей.",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/admin/projects/{id}",
+                "summary": "Проект любого пользователя по ID (админ)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "ProjectResponse",
+                "note": "В отличие от GET /api/v0/projects/{id} проверка владельца не выполняется.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProjectResponse> проекта независимо от владельца" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/admin/projects/{id}",
+                "summary": "Обновить проект любого пользователя (админ)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "requestBody": { "$ref": "тело UpdateProjectRequest — то же, что у PATCH /api/v0/projects/{id}" },
+                "response": "ProjectResponse",
+                "note": "Частичное обновление: null-поля не трогаются. Набор полей (socialLinks, businessHours, brandProfile) идентичен владельческому PATCH.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<ProjectResponse> с применёнными изменениями" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateProjectRequest нарушены ограничения (name 2..100, city ≤50, description ≤2000, targetAudience ≤500, brandProfile ≤100000)" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/admin/projects/{id}",
+                "summary": "Удалить проект любого пользователя (админ)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "204 No Content",
+                "note": "В отличие от DELETE /api/v0/projects/{id} (там 200 OK) админский вариант отдаёт 204. Каскад тот же: логотип из MinIO (best-effort) + событие project.deleted с НАСТОЯЩИМ ownerId, поэтому generative-orchestration сносит посты/задачи/медиа именно его проекта.",
+                "responses": [
+                    { "status": 204, "description": "Проект удалён независимо от владельца, каскад запущен. Ответ без тела." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при удалении" }
                   ]
               }
@@ -944,9 +1029,9 @@
                   "currentMonth": { "type": "string", "required": false },
                   "currentYear": { "type": "int", "required": false }
                 },
-                "response": "202 Accepted AsyncGenerateResponse { taskId }",
+"response": "202 Accepted AsyncGenerateResponse { taskId, status, postId }",
                 "responses": [
-                    { "status": 202, "description": "AsyncGenerateResponse { taskId, status: PROCESSING }. Вызов Единого Шлюза уходит в фоновый пул: его ошибка НЕ превращается в HTTP-ошибку, а ставит задаче статус FAILED (читать через GET /orchestration/tasks/{taskId}). Если sync-ответ Шлюза уже содержит текст, посты создаются сразу и задача сразу COMPLETED." },
+                    { "status": 202, "description": "AsyncGenerateResponse { taskId, status: PROCESSING, postId }. Приём задачи сразу создаёт пост-заглушку (Post.status=GENERATING, taskId), поэтому он виден в контент-плане и по нему можно вернуться к ожиданию; postId — первый созданный пост, он же станет resultPostId задачи. Вызов Единого Шлюза уходит в фоновый пул: его ошибка НЕ превращается в HTTP-ошибку, а ставит задаче статус FAILED и удаляет незаполненные заглушки (читать через GET /orchestration/tasks/{taskId}). Если sync-ответ Шлюза уже содержит текст, та же заглушка заполняется и задача сразу COMPLETED." },
                     { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid GenerateRequest: projectId отсутствует, mode отсутствует, count < 1; либо бизнес-проверка validateRequest: MANUAL без prompt, либо AUTO без industry/description/toneOfVoice" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела, до сервиса" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД при сохранении задачи" }
@@ -960,7 +1045,7 @@
                 "pathParams": { "taskId": "UUID" },
                 "response": "TaskStatusResponse",
                 "responses": [
-                    { "status": 200, "description": "TaskStatusResponse { status: PROCESSING|COMPLETED|FAILED, errorMessage, postId/resultPostId, generatedText }. Чистое чтение БД: ни квот, ни внешних вызовов." },
+                    { "status": 200, "description": "TaskStatusResponse { status: PROCESSING|COMPLETED|FAILED, errorMessage, postId/resultPostId, generatedText }. postId заполнен с момента приёма задачи (указывает на заглушку), generatedText — только когда пост заполнен. Чистое чтение БД: ни квот, ни внешних вызовов." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "задачи с таким taskId нет в БД. ВНИМАНИЕ: проверки владельца нет — любой авторизованный пользователь видит чужую задачу." },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "taskId не разбирается как UUID (MethodArgumentTypeMismatchException) или ошибка БД" }
@@ -984,7 +1069,8 @@
                 "responses": [
                     { "status": 200, "description": "CriticReviewResponse { status, critic, data, error } — аудит поста критиком Чарли Мангера. Правки применяются клиентом через PATCH /orchestration/posts/{id}." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю (requireOwned)" },
+{ "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю (requireOwned)" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "контур критика ответил не-2xx (CriticClient бросает IllegalStateException со статусом) или недоступен; также subject не UUID" }
                   ]
               },
@@ -1002,12 +1088,13 @@
                   "scheduledAt": { "type": "ISO-8601 Instant", "required": false }
                 },
                 "response": "PostResponse",
-                "note": "Владельцем считается пользователь, чей userId совпадает с userId поста",
+"note": "Владельцем считается пользователь, чей userId совпадает с userId поста. Пост в статусе GENERATING редактировать нельзя (409 POST_STILL_GENERATING) — правки перезаписал бы ответ контура",
                 "responses": [
-                    { "status": 200, "description": "ApiResponse<PostResponse> — частично обновлённый пост (text, imageUrl, hashtags, targetPlatforms, scheduledAt)" },
+                    { "status": 200, "description": "ApiResponse<PostResponse> — частично обновлённый пост (text, imageUrl, hashtags, targetPlatforms, scheduledAt); taskId и status проходят в ответе" },
                     { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdatePostRequest: нарушены ограничения на переданные поля" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
                   ]
               },
@@ -1029,6 +1116,7 @@
                     { "status": 400, "code": "EMPTY_MEDIA_FILE", "when": "файл передан, но пустой (0 байт)" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю — проверка идёт до валидации файла" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 502, "code": "MEDIA_UPLOAD_FAILED", "when": "MinIO вернул пустой результат: uploaded.isEmpty() после попытки загрузки" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен (голый RuntimeException из MediaStorageService), файл выше лимита multipart или ошибка БД" }
                   ]
@@ -1041,9 +1129,10 @@
                 "pathParams": { "id": "UUID" },
                 "response": "PostResponse",
                 "responses": [
-                    { "status": 200, "description": "ApiResponse<PostResponse> — пост подтверждён (статус CONFIRMED)" },
+{ "status": 200, "description": "ApiResponse<PostResponse> — пост подтверждён (статус CONFIRMED)" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
                   ]
               },
@@ -1057,7 +1146,8 @@
                 "responses": [
                     { "status": 200, "description": "ApiResponse<PostResponse> — пост опубликован (PUBLISHED + publishedAt)" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+{ "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 502, "code": "AI_PUBLISH_ERROR", "when": "пост не отправлен в AI-контур: контур недоступен, таймаут или ответ без успеха (tryPublishViaContour вернул false)" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
                   ]
@@ -1094,7 +1184,8 @@
                     { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid SchedulePostRequest: scheduledAt отсутствует" },
                     { "status": 400, "code": "INVALID_SCHEDULED_DATE", "when": "scheduledAt не в будущем (requireFuture)" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+{ "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
                   ]
               },
@@ -1109,6 +1200,7 @@
                     { "status": 200, "description": "ApiResponse<PostResponse> — пост отклонён (REJECTED). Это и есть действие «отложить» на фронте." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "пост не найден или принадлежит другому пользователю" },
+                    { "status": 409, "code": "POST_STILL_GENERATING", "when": "пост ещё в статусе GENERATING (заглушка асинхронной генерации) — дождитесь результата" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
                   ]
               },
@@ -1119,7 +1211,7 @@
                 "auth": "Bearer",
                 "pathParams": { "id": "UUID" },
                 "response": "204 No Content (тело пустое)",
-                "note": "Каскадно удаляет post_statistics и проектные медиа в MinIO по media/{projectId}/** (best-effort по объекту). Опубликованный пост удалить нельзя. Чужой пост отдаётся как 404, а не 403 — по аналогии с остальными эндпоинтами, чтобы не подтверждать существование чужого поста.",
+"note": "Каскадно удаляет post_statistics и проектные медиа в MinIO по media/{projectId}/** (best-effort по объекту). Опубликованный пост удалить нельзя. Заглушку GENERATING удалить МОЖНО — это отмена ожидания (позже пришедший callback пост не воскресит). Чужой пост отдаётся как 404, а не 403 — по аналогии с остальными эндпоинтами, чтобы не подтверждать существование чужого поста.",
                 "responses": [
                     { "status": 204, "description": "Пост удалён. Тело пустое." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
@@ -1150,9 +1242,82 @@
                 "pathParams": { "projectId": "UUID" },
                 "response": "PostResponse[]",
                 "responses": [
-                    { "status": 200, "description": "ApiResponse<PostResponse[]> — посты проекта, сортировка по createdAt DESC. Нет постов — пустой массив, а не 404." },
+{ "status": 200, "description": "ApiResponse<PostResponse[]> — посты проекта, сортировка по createdAt DESC. Нет постов — пустой массив, а не 404." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "projectId не разбирается как UUID (MethodArgumentTypeMismatchException) или ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "AdminPostController": {
+            "tag": "Админ: посты",
+            "basePath": "/admin/orchestration",
+            "gatewayPattern": "/api/v0/admin/orchestration, /api/v0/admin/orchestration/**",
+            "note": "Путь повторяет /orchestration, чтобы отличаться только префиксом /admin. Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе. Отличия от GenerationController: нет проверки владельца и DELETE разрешён для PUBLISHED — это модераторский инструмент.",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/admin/orchestration/posts/{id}",
+                "summary": "Пост любого пользователя по ID (админ)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "PostResponse",
+                "note": "В отличие от GET /api/v0/orchestration/posts/{id} проверка владельца не выполняется. Метрики отдаются так же, как у владельца.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> поста независимо от владельца" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/admin/orchestration/posts/{id}",
+                "summary": "Обновить пост любого пользователя (админ)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "requestBody": { "$ref": "тело UpdatePostRequest — то же, что у PATCH /api/v0/orchestration/posts/{id}" },
+                "response": "PostResponse",
+                "note": "Частичное обновление теми же правилами, что у владельца: null-поля не трогаются, scheduledAt должен быть в будущем. Статус поста не меняется.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse> с применёнными изменениями" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "нарушены ограничения UpdatePostRequest либо scheduledAt в прошлом" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/admin/orchestration/posts/{id}",
+                "summary": "Удалить пост любого пользователя (админ)",
+                "auth": "Bearer",
+                "pathParams": { "id": "UUID" },
+                "response": "204 No Content",
+                "note": "В отличие от DELETE /api/v0/orchestration/posts/{id} (409 POST_ALREADY_PUBLISHED для PUBLISHED) админский вариант снимает и уже опубликованный пост. Метрики (post_statistics) и файл поста удаляются вместе с ним; чистка MinIO best-effort.",
+                "responses": [
+                    { "status": 204, "description": "Пост удалён независимо от владельца и статуса, метрики и медиа снесены. Ответ без тела." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при удалении" }
+                  ]
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/admin/orchestration/projects/{projectId}/posts",
+                "summary": "Посты любого проекта (админ)",
+                "auth": "Bearer",
+                "pathParams": { "projectId": "UUID" },
+                "response": "PostResponse[]",
+                "note": "Сортировка по createdAt DESC, метрики подтягиваются одним батчем. Нет постов — пустой массив, а не 404.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<PostResponse[]> — все посты проекта независимо от владельца" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "projectId не разбирается как UUID или ошибка БД" }
                   ]
               }
             ]
@@ -1249,7 +1414,7 @@
           "AiCallbackController": {
             "tag": "AI callback (входящий от AI-сервера)",
             "basePath": "/api/v1/ai",
-            "note": "Публичный маршрут gateway /api/v1/ai/**; JWT НЕ требуется — проверяется заголовок X-Internal-Secret (constant-time). Обработка: generate_post → session_id=taskId (async-задача) создаёт пост и переводит задачу в COMPLETED (идемпотентно: COMPLETED/FAILED пропускается); иначе legacy session_id=projectId → пост DRAFT. quick_scan/analyze_documents/onboard_user/onboarding → session_id=sessionId анализа бизнеса, результат завершает анализ (BusinessAnalysisService.complete)",
+            "note": "Публичный маршрут gateway /api/v1/ai/**; JWT НЕ требуется — проверяется заголовок X-Internal-Secret (constant-time). Обработка: generate_post → session_id=taskId (async-задача) ЗАПОЛНЯЕТ посты-заглушки этой задачи (Post.status GENERATING → DRAFT) и переводит задачу в COMPLETED (идемпотентно: COMPLETED/FAILED пропускается; уже заполненный пост не перезаписывается). Если заглушек нет — пользователь удалил пост, задача закрывается COMPLETED без resultPostId и новый пост не создаётся; иначе legacy session_id=projectId → новый пост DRAFT. quick_scan/analyze_documents/onboard_user/onboarding → session_id=sessionId анализа бизнеса, результат завершает анализ (BusinessAnalysisService.complete)",
             "endpoints": [
               {
                 "method": "POST",
@@ -1336,6 +1501,32 @@
                     { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid SocialVerifyRequest: channel или reference пустой" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "необработанное исключение (внутри verify сетевые ошибки превращаются в verified:false, поэтому 500 маловероятен)" }
+                  ]
+              }
+            ]
+          },
+          "IdeaBankController": {
+            "tag": "Банк идей",
+            "basePath": "/orchestration/ideas",
+            "gatewayPattern": "/api/v0/orchestration/**",
+            "note": "Каталог ситуативных тем с контура (SmartIdeaBank, task_type=get_idea_bank): праздники/сезон/тренды с оценкой релевантности нише и рекомендацией этапа воронки. Ниша проекта переводится из enum industry в текст; проект и контур — best-effort (недоступность отдаёт пустой список, а не ошибку), успешные ответы кэшируются в памяти на services.idea-bank.ttl-seconds. Один вызов обслуживает все UI-места: чипы на главной, плейсхолдер промпта и список «С чего начать». auth=Bearer (userId из principal).",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/orchestration/ideas/bank",
+                "summary": "Актуальные темы для проекта (Банк идей)",
+                "auth": "Bearer",
+                "requestBody": {
+                  "projectId": { "type": "UUID", "required": true },
+                  "limit": { "type": "int", "required": false, "default": "6", "constraints": "1..20" }
+                },
+                "response": "IdeaBankResponse { ideas: IdeaResponse[] }, IdeaResponse { id, title, topic, hint, daysUntil, category, relevance, funnel, framework }",
+                "note": "Идеи отсортированы по daysUntil (ближайшие первыми), затем по relevance. Карточки без title отбрасываются, нечисловые days_until/niche_relevance читаются как null. topic = description → sample_hook → title (готовый промпт), hint = crossover_angle → date_str.",
+                "responses": [
+                    { "status": 200, "description": "IdeaBankResponse { ideas }. ideas пуст, если контур недоступен, вернул error или ответ без поля ideas — фронт остаётся на своих заготовках." },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid IdeaBankRequest: projectId отсутствует или limit вне 1..20" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "необработанное исключение (ошибки контура и проекта гасятся в IdeaBankService, поэтому 500 маловероятен)" }
                   ]
               }
             ]

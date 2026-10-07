@@ -9,6 +9,23 @@ out/
 .env
 *.env
 
-# Ops infrastructure (deployed independently)
-ucust-ops/
+# Separate repositories (deployed/развиваются независимо).
+# ВНИМАНИЕ: папка называется ops/, а репозиторий на GitHub — ops.git.
+# Раньше здесь было ucust-ops/, из-за чего папка не игнорировалась.
+ops/
+
+# Спецификации API ведутся в отдельном репозитории
+UCust-API-Specifications/
+
+# Frontend админки (отдельный репозиторий)
 ucust-admin-spa/
+
+# Локальный скрап: копии файлов контура, скриншоты, разное
+__FILES__/
+
+# JVM crash-логи
+hs_err_pid*.log
+replay_pid*.log
+
+# Тестовые загрузки
+avatar.png
