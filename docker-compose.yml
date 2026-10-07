@@ -128,6 +128,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - QUOTA_FREE_UNLIMITED=${QUOTA_FREE_UNLIMITED:-false}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
     networks:
       - ucust-net
     restart: unless-stopped
