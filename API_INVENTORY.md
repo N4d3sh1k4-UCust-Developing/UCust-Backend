@@ -4,7 +4,7 @@
 `ApiGatewayApplication.java` (289 строк, 26 роутов) репозитория
 `D:\Projects\IdeaProjects\N4d3sh1k4-UCust_Dev`.
 
-Дата анализа: 2026-10-06. Обновлено: 2026-10-07 (см. §2 — все 7 критичных багов исправлены; см. §6 — реализован P0-бэклог для админ-панели).
+Дата анализа: 2026-10-06. Обновлено: 2026-10-07 (см. §2 — все 7 критичных багов исправлены; см. §6 — реализован P0-бэклог для админ-панели). Обновлено: 2026-10-08 (P1 «биллинг и модерация»: 14 новых admin-эндпоинтов в billing/business/GOS, см. §1 №28–41 и §4).
 Фронтенд-панель: `D:\Projects\UcustAdminVibecode`.
 
 **Модель доступа.** Gateway прокидывает `X-User-Id` / `X-User-Roles` фильтром
@@ -14,12 +14,12 @@
 (`security-service-public`, `billing-tariffs-public`, `ai-callback-public`), а `/tariffs/**`
 дополнительно закрыт `hasRole("ADMIN")` на стороне billing.
 
-**Итого через gateway:** 89 API-методов (33 security + 7 user + 9 business + 10 billing + 32 GOS).
-**Admin-методов с `ROLE_ADMIN`: 27** (18 было + сессии + P0 2026-10-07: карточка, роли, блокировка, справочник ролей, правка профиля, аватар).
+**Итого через gateway:** 103 API-метода (33 security + 7 user + 11 business + 16 billing + 36 GOS).
+**Admin-методов с `ROLE_ADMIN`: 41** (27 было + P0 2026-10-07 + P1 2026-10-08: биллинг 6, проекты 2, посты 3, задачи 3).
 
 ---
 
-## 1. Все 27 admin-эндпоинтов
+## 1. Все 41 admin-эндпоинтов
 
 | # | Метод | Путь через gateway | Что делает | Сервис |
 |---|---|---|---|---|
@@ -50,6 +50,20 @@
 | 25 | GET | `/api/v0/admin/roles` | Справочник ролей → `List<RoleResponse{id,name}>` (сорт по имени) | security |
 | 26 | PATCH | `/api/v0/admin/users/{userId}` | Правка чужого профиля (та же валидация, что `PATCH /user/me`) → `ProfileResponse` | user |
 | 27 | POST | `/api/v0/admin/users/{userId}/avatar` | Замена аватара чужого профиля (multipart) → URL | user |
+| 28 | GET | `/api/v0/admin/billing/subscriptions?active=&tariffId=&page=&size=` | Список подписок (фильтры опциональны, size 1..100) → `AdminSubscriptionsPage{items,total,page,size}` | billing |
+| 29 | DELETE | `/api/v0/admin/billing/subscriptions/{userId}` | Отмена подписки (soft): `paid=false` → 204; нет подписки — 404 | billing |
+| 30 | POST | `/api/v0/admin/billing/subscriptions/{userId}/extend?months=1..120` | Продление: `paid=true`, `nextResetDate` += месяцев (база `max(nextResetDate, now)`, UTC) → 204; нет подписки — 404 | billing |
+| 31 | GET | `/api/v0/admin/billing/quota/{userId}` | Агрегат квот (`AdminQuotaResponse{quota,used,remaining}`); нет подписки — 404 | billing |
+| 32 | GET | `/api/v0/admin/billing/quota/usage/{userId}` | По-модельным `UsageCounterResponse{model,used,total}`; нет подписки — пустой список | billing |
+| 33 | POST | `/api/v0/admin/billing/quota/reset/{userId}` | Ручной сброс всех квот → 204; нет подписки — 404 | billing |
+| 34 | GET | `/api/v0/admin/projects?search=&ownerId=&page=&size=` | Глобальный список/поиск по имени (case-insensitive)/фильтр по владельцу (size 1..200) → `AdminProjectsPage{items,total,page,size}` | business |
+| 35 | POST | `/api/v0/admin/projects` | Создание проекта от имени пользователя: body `{ownerId, project:{...}}` → `ProjectResponse` | business |
+| 36 | GET | `/api/v0/admin/orchestration/posts?status=&userId=&projectId=&page=&size=` | Глобальный список постов с метриками, фильтры опциональны (size 1..200) → `AdminPostsPage` | GOS |
+| 37 | POST | `/api/v0/admin/orchestration/posts/{id}/publish` | Публикация чужого поста: отправка в AI-контур каналом владельца + `PUBLISHED` → `PostResponse` | GOS |
+| 38 | POST | `/api/v0/admin/orchestration/posts/{id}/reject` | Перевод чужого поста в `REJECTED` → `PostResponse` | GOS |
+| 39 | GET | `/api/v0/admin/orchestration/tasks?status=&userId=&page=&size=` | Глобальный список задач генерации (фильтры опциональны, size 1..200) → `AdminTasksPage` | GOS |
+| 40 | POST | `/api/v0/admin/orchestration/tasks/{id}/retry` | Перезапуск упавшей задачи: сброс ошибки, новый плейсхолдер, фоновая генерация → 202 `AsyncGenerateResponse`; COMPLETED / in-flight — 409 `TASK_ALREADY_COMPLETED`/`TASK_IN_FLIGHT`; нет — 404 | GOS |
+| 41 | DELETE | `/api/v0/admin/orchestration/tasks/{id}` | Удаление задачи: снятие незаполненных заглушек, готовые посты сохраняются → 204; in-flight — 409 | GOS |
 
 **Тарифы (не под `/admin/**`, но с ролью):** `GET /api/v0/tariffs[/{id}]` — публичный
 (`billing-tariffs-public`, GET-only, заголовки `X-User-Id`/`X-User-Roles` срезаются);
@@ -112,7 +126,7 @@
 | `Role`, `Privilege` | Роли/привилегии | `GET /admin/roles` (справочник) + `PUT /admin/accounts/{id}/roles` (полная замена с защитами `CANNOT_MODIFY_OWN_ROLES`/`ROLE_NOT_FOUND`/`LAST_ADMIN`) — **сделано 2026-10-07**; сидер `DataInitializer` создаёт `ROLE_ADMIN` + дефолтного админа, всем новым ставится `USER` | Создание/переименование ролей, выдача прав (Привилегии), фильтр пользователей по роли |
 | `UserIdentity` | OAuth-идентичности | только косвенно через auth-флоу | Привязанные соцсети пользователя, отвязка админом |
 | `Token` | Одноразовые токены (подтверждение почты, сброс пароля) | косвенно через `/auth/confirm-email`, `/auth/reset-password`, `/auth/change-email/*` | Активные/просроченные токены, принудительное подтверждение почты |
-| `GenerationTask` (GOS) | Задачи AI-генерации | `GET /orchestration/tasks/{taskId}` (с 2026-10-07 — с проверкой владельца) | Список по пользователю/статусу/проекту, очередь зависших, retry/отмена |
+| `GenerationTask` (GOS) | Задачи AI-генерации | `GET /orchestration/tasks/{taskId}` (с 2026-10-07 — с проверкой владельца) | ✅ **P1 2026-10-08**: `GET /admin/orchestration/tasks?status=&userId=`, `POST .../tasks/{id}/retry`, `DELETE .../tasks/{id}` (без отмены живого потока — защита 409). Не сделано: очередь зависших |
 | `PostStatistics` (GOS) | Метрики постов | только поля внутри `PostResponse` | Списки и агрегаты по проекту/пользователю/периоду |
 | `BusinessAnalysis` (GOS) | Онбординг-анализ бизнеса | `POST /orchestration/analysis`, `GET .../analysis/{id}` — **self** | Список всех, чужие, удаление |
 | `ChannelAnalysis` (GOS) | Анализ Telegram-канала | `POST /orchestration/channel/analyze`, `GET .../analysis/{id}` — **self** | Список всех, чужие |
@@ -129,10 +143,10 @@
 |---|---|---|---|
 | `RefreshToken` (сессии) | `GET/DELETE /auth/sessions`, `DELETE /auth/sessions/{id}` — только для себя | `GET/DELETE /admin/accounts/{id}/sessions` | ✅ **сделано 2026-10-07** (`AdminUserService.listSessions`/`revokeAllSessions` + контроллер) |
 | `UserProfile` | `GET/PATCH /user/me`, `POST /user/me/avatar`; admin было только чтение | `PATCH /admin/users/{id}`, `POST .../avatar` | ✅ **сделано 2026-10-07** (admin-обёртки над `ProfileService.update/uploadAvatar`) |
-| `Project` | self полный CRUD; admin `GET/PATCH/DELETE /admin/projects/{id}` | **`GET /admin/projects`** — глобальный список/поиск/фильтр по владельцу | **`ProjectRepository` готов, `listAll` нет** |
-| `Post` (GOS) | self 13 эндпоинтов; admin 4 — по id/projectId | **`GET /admin/posts`** — глобальный список с фильтрами (модерационная очередь); publish/reject | **репозиторий готов**, `publishPost/rejectPost` есть, admin-обёртки нет |
-| `UserSubscription` | self `GET /quota/me/tariff`, `POST /quota/me/purchase`; admin — по одному userId | Список всех подписок, отмена, продление, история | **репозиторий готов**; `cancel`/`expire` **нет вообще**; в billing **нет ни одного `@Scheduled`** |
-| `UsageCounter` (квоты) | только агрегатом в `GET /quota/me/tariff` | `GET /admin/billing/quota/{userId}`, `.../usage/{userId}`, ручной reset | **`resetUsageCounters` есть, но private**; прямого чтения нет |
+| `Project` | self полный CRUD; admin `GET/PATCH/DELETE /admin/projects/{id}` | Список/поиск/фильтр по владельцу + создание от имени пользователя | ✅ **P1 2026-10-08** (`listPostsAsAdmin`-аналог: `listAsAdmin` + `createAsAdmin`) |
+| `Post` (GOS) | self 13 эндпоинтов; admin 4 — по id/projectId | Глобальный список с фильтрами (модерационная очередь); publish/reject | ✅ **P1 2026-10-08** (`GET /admin/orchestration/posts?status=&userId=&projectId=`, `POST .../publish`, `POST .../reject`) |
+| `UserSubscription` | self `GET /quota/me/tariff`, `POST /quota/me/purchase`; admin — по одному userId | Список всех подписок, отмена, продление, история | ✅ **P1 2026-10-08** (список + `DELETE` cancel + `POST .../extend`). Не сделано: история изменений; **в billing нет ни одного `@Scheduled`** (ручной reset квот) |
+| `UsageCounter` (квоты) | только агрегатом в `GET /quota/me/tariff` | `GET /admin/billing/quota/{userId}`, `.../usage/{userId}`, ручной reset | ✅ **P1 2026-10-08** |
 | `Tariff` | self `GET /tariffs[/{id}]`; `POST/PUT/DELETE /tariffs` | `/admin/billing/tariffs` как отдельный путь | ✅ **CRUD работает 2026-10-07** через `POST/PUT/DELETE /api/v0/tariffs[/{id}]` (см. §2 №1, №7) |
 | `Ban` | admin-эндпоинты есть (6 шт.) | Уведомление о бане, self-проверка | ✅ **вход блокируется 2026-10-07** (`requireNotBanned` во всех точках входа); публикации события в `createBan` по-прежнему нет |
 | `User` (роли/статус) | — | Расширенный `GET /admin/accounts/{id}` (email, provider, все провайдеры, роли, enabled/lockTime/failedAttempts, активный бан); `PUT .../roles`; `POST/DELETE .../block` | ✅ **сделано 2026-10-07**. Не сделано: **дата регистрации** (колонки `created_at` нет ни в `users`, ни в `user_profile` — нужна миграция + бэкфилл), «разблокировать по rate-limit» (нет метода) |
@@ -158,24 +172,24 @@
 ### Проекты / посты (модерация)
 | Эндпоинт | Стадия |
 |---|---|
-| `GET /admin/projects?search=&ownerId=&page=&limit=` | сервис-метода нет, репозиторий готов |
-| `GET /admin/posts?status=&userId=&projectId=&from=&to=&page=` | сервис-метода нет, репозиторий готов |
-| `POST /admin/projects` — создание от имени пользователя (поддержка/тесты) | сервис-метод есть (`create(request, ownerId)`), контроллера нет |
-| `POST /admin/orchestration/posts/{id}/publish` | сервис-метод есть, admin-обёртки нет |
-| `POST /admin/orchestration/posts/{id}/reject` | то же |
-| `GET /admin/orchestration/tasks?status=&userId=&page=` | нет вообще |
-| `POST .../tasks/{id}/retry`, `DELETE .../tasks/{id}` | нет вообще |
+| `GET /admin/projects?search=&ownerId=&page=&limit=` | ✅ **P1 2026-10-08** (`listAsAdmin`, search по имени case-insensitive; параметр `limit`=size, 1..200) |
+| `GET /admin/posts?status=&userId=&projectId=&from=&to=&page=` | ✅ **P1 2026-10-08** частично: `GET /admin/orchestration/posts?status=&userId=&projectId=` через `JpaSpecificationExecutor<Post>`; диапазонов дат (`from`/`to`) нет |
+| `POST /admin/projects` — создание от имени пользователя (поддержка/тесты) | ✅ **P1 2026-10-08** (`createAsAdmin(ownerId, request)` → `ProjectService.create`, событие `project.created` уходит владельцу) |
+| `POST /admin/orchestration/posts/{id}/publish` | ✅ **P1 2026-10-08** (owner-проверка снята, AI-контур зовётся каналом владельца) |
+| `POST /admin/orchestration/posts/{id}/reject` | ✅ **P1 2026-10-08** |
+| `GET /admin/orchestration/tasks?status=&userId=&page=` | ✅ **P1 2026-10-08** |
+| `POST .../tasks/{id}/retry`, `DELETE .../tasks/{id}` | ✅ **P1 2026-10-08** (retry: только non-COMPLETED, 409 для in-flight; delete: только не in-flight, placeholders снимаются, готовые посты сохраняются) |
 | `GET /admin/orchestration/channel/analysis`, `GET /admin/orchestration/analysis` (списки) | есть только self-endpoint |
 
 ### Биллинг
 | Эндпоинт | Стадия |
 |---|---|
 | `GET/POST/PUT/DELETE /tariffs[/{id}]` (через gateway `/api/v0/tariffs`) | ✅ работает (2026-10-07, §2 №1/№7) — отдельного `/admin/billing/tariffs` пути нет |
-| `GET /admin/billing/subscriptions?active=&tariffId=&page=` | сервис-метода нет, репозиторий готов |
-| `DELETE /admin/billing/subscriptions/{userId}` — отмена | нет вообще |
-| `POST /admin/billing/subscriptions/{userId}/extend` | нет вообще |
-| `POST /admin/billing/quota/reset/{userId}` | сервис-метод есть, но private |
-| `GET /admin/billing/quota/{userId}`, `GET /admin/billing/usage/{userId}` | есть только self-endpoint |
+| `GET /admin/billing/subscriptions?active=&tariffId=&page=` | ✅ **P1 2026-10-08** (`listSubscriptions` по `UserSubscriptionRepository`) |
+| `DELETE /admin/billing/subscriptions/{userId}` — отмена | ✅ **P1 2026-10-08** (soft-cancel: `paid=false`, FREE остаётся активной) |
+| `POST /admin/billing/subscriptions/{userId}/extend` | ✅ **P1 2026-10-08** (`?months=1..120`, `paid=true` + `nextResetDate` += месяцев) |
+| `POST /admin/billing/quota/reset/{userId}` | ✅ **P1 2026-10-08** (405-кода нет: path `/quota/reset/{userId}`) |
+| `GET /admin/billing/quota/{userId}`, `GET /admin/billing/usage/{userId}` | ✅ **P1 2026-10-08** (прямое чтение агрегата и по-модельных счётчиков; usage без подписки — пустой список) |
 | `GET /admin/billing/payments` | нет вообще (сущности нет, purchase — мок) |
 | `@Scheduled` сброса квот по `nextResetDate` | нет вообще (в billing нет ни одного) |
 
@@ -228,6 +242,9 @@
 **P0 (2026-10-07, см. §6):** `GET /admin/accounts/{userId}`, `PUT .../roles`, `POST/DELETE .../block`,
 `GET /admin/roles`, `PATCH /admin/users/{userId}`, `POST /admin/users/{userId}/avatar`,
 `GET /status/ban` (self).
+**P1 (2026-10-08, см. §7):** списки и действия по подпискам/квотам/проектам/постам/задачам — панель может
+заменить self-чтения на глобальные и добавить кнопки «Отменить подписку», «Продлить», «Опубликовать»,
+«Отклонить», «Перезапустить задачу».
 
 ---
 
@@ -255,3 +272,48 @@
   user: `AdminUserControllerTest` (5).
 - **Сознательно НЕ сделано:** дата регистрации (нет колонки `created_at`; деактивация rate-limit
   отдельным методом; уведомление/email о бане).
+
+---
+
+## 7. Реализованный P1 — биллинг и модерация
+
+Реализовано 2026-10-08 по приоритизации §3/§4. Все эндпоинты под `ROLE_ADMIN` (gateway-роуты
+`/api/v0/admin/**` уже существовали). Все имеют тесты; полные сьюты billing/business/GOS зелёные.
+
+- **billing-service** (6 эндпоинтов):
+  - `GET /admin/billing/subscriptions?active=&tariffId=&page=&size=` → `AdminSubscriptionsPage`
+    (фильтр `active` по `paid`, `tariffId` по подписке; size 1..100);
+  - `DELETE /admin/billing/subscriptions/{userId}` — soft-cancel (`paid=false`); FREE остаётся активной,
+    платные перестают считаться активными; нет подписки — 404;
+  - `POST /admin/billing/subscriptions/{userId}/extend?months=1..120` — `paid=true` + `nextResetDate` += месяцев
+    (база = `max(nextResetDate, now)`, UTC); нет подписки — 404;
+  - `GET /admin/billing/quota/{userId}` → `AdminQuotaResponse{quota, used, remaining}` (агрегат);
+    нет подписки — 404;
+  - `GET /admin/billing/quota/usage/{userId}` → `List<UsageCounterResponse{model, used, total}>`;
+    нет подписки — пустой список;
+  - `POST /admin/billing/quota/reset/{userId}` → 204 (не трогает дату сброса `nextResetDate`);
+    нет подписки — 404.
+- **business-service** (2 эндпоинта):
+  - `GET /admin/projects?search=&ownerId=&page=&size=` → `AdminProjectsPage{items,total,page,size}` —
+    `search` по имени case-insensitive, size 1..200;
+  - `POST /admin/projects` — body `{ownerId, project:{...}}` → создание от имени владельца
+    (`ProjectService.create`; событие `project.created` уходит реальному владельцу через RabbitMQ).
+- **generative-orchestration-service** (6 эндпоинтов):
+  - `GET /admin/orchestration/posts?status=&userId=&projectId=&page=&size=` → `AdminPostsPage` —
+    фильтры через `JpaSpecificationExecutor<Post>` (раньше проверки владельца обходились per-id);
+  - `POST /admin/orchestration/posts/{id}/publish` — публикация чужого поста (owner-проверка снята,
+    AI-контур зовётся каналом владельца); `POST .../reject` — перевод в `REJECTED`;
+  - `GET /admin/orchestration/tasks?status=&userId=&page=&size=` → `AdminTasksPage` (derived pageable);
+  - `POST /admin/orchestration/tasks/{id}/retry` → 202 — сброс ошибки, новый плейсхолдер, фоновый запуск
+    тем же путём, что обычная генерация (`schedule` + `runGeneration`); COMPLETED — 409 `TASK_ALREADY_COMPLETED`,
+    in-flight — 409 `TASK_IN_FLIGHT`, нет задачи — 404;
+  - `DELETE /admin/orchestration/tasks/{id}` → 204 — снятие незаполненных заглушек
+    (`discardGeneratingPosts`), готовые посты задачи сохраняются; in-flight — 409.
+- **Тесты:** billing `QuotaServiceTest` (+9), `SubscriptionServiceTest` (+9), `AdminBillingControllerTest` (4),
+  `AdminSubscriptionControllerTest` (+6); business `ProjectServiceTest` (+7), `AdminProjectControllerTest` (5);
+  GOS `GenerationServiceTest` (+8), `AsyncGenerationServiceTest` (+9), `AdminPostControllerTest` (5),
+  `AdminTaskControllerTest` (7). Сводно: billing 115+, business 170+, GOS 260+ (полные сьюты зелёные;
+  экологических падений нет).
+- **Сознательно НЕ сделано:** `@Scheduled`-автосброс квот по `nextResetDate` (в billing нет ни одного;
+  ручной reset работает); range-фильтры `from`/`to` в списке постов; история изменений подписки;
+  списки `channel/analysis` и `analysis` (self-only).
