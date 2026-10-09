@@ -95,6 +95,16 @@ Microservices on Spring Boot 4 / Java 25:
 - Тесты: `OAuth2EmailResolverTest` (13 кейсов: `emails[]`-only, приоритет verified, приоритет `default_email`, мусор в массиве, не-строковое значение, пробелы, verified-строка вместо boolean), `PromptingOAuth2AuthorizationRequestResolverTest` (6 кейсов: prompt ровно один, сохранение state/scope/client_id, нетронутый VK, пустой prompt отключает), +2 кейса в `YandexAuthServiceTest` (письмо из `emails[]`, недоступность провайдера, таймауты на фабрике), +1 кейс в `OAuth2SuccessHandlerTest` (веб-вход по `emails[]`).
 - Статус: `:security-service:test` — 237 тестов, 1 падение (то же экологическое `SecurityServiceApplicationTests > contextLoads()`, нужен живой PostgreSQL на `:5440`), `gradlew build -x test` успешно.
 
+### 12. Телефон: единый `PhoneUtils` и провайдерские номера (2026-10-09)
+
+Правило номера теперь одно на все сервисы — `common/.../utils/PhoneUtils.java`: формат `79XXXXXXXXX` (11 цифр), `REGEX`/`MESSAGE` — публичные константы для `@Pattern`, `normalize(raw)` приводит `«+7 (900) 000-00-00»`/`«8 (900) 123-45-67»` → `79000000000` (10 цифр на `9` → префикс `7`), невалидное/пустое → `null`, `isValid(raw)`.
+
+- **Профиль (user-service)**: `UpdateProfileRequest.phone` использует `PhoneUtils.REGEX`/`MESSAGE` вместо дублированного литерала (то же поведение — принимается уже нормализованный `79XXXXXXXXX`; фронт нормализует до отправки, `Frontend/lib/api/profileFields.ts`).
+- **Провайдер (security-service)**: новый `OAuth2PhoneResolver` (`security-service/.../utils/`) — единый разбор номера для веба (`OAuth2SuccessHandler`) и mobile (`YandexAuthService.authenticateMobile`). Порядок ключей: `phone_number` (OIDC) → `phone` (VK, строка) → `default_phone` (Яндекс) → первый валидный из `phones[]`. Значения бывают объектами `{id, number}` (Яндекс), поэтому больше нет `String rawPhone = getAttribute(...)` (риск `ClassCastException`). Невалидное значение не блокирует вход: пропускается и возвращается `null`.
+- **События (user-service)**: `UserEventListener.handleUserCreated`/`handlePhoneBackfill` нормализуют входящий номер через `PhoneUtils`, невалидный — игнорируется (warn, профиль остаётся без телефона / backfill не затирает существующее).
+- Тесты: `OAuth2PhoneResolverTest` (9 кейсов: все формы ответа, приоритет, `8`/10-значные, мусор, `phones[]` с городским первым), обновлён `YandexAuthServiceTest` (`+79990000000` → `79990000000`), новые кейсы в `UserEventListenerTest` (нормализация при создании, невалидный → null, backfill нормализует/игнорирует/не затирает).
+- Статус: `:security-service:test` 292 теста и `:user-service:test` 42 теста — падает только экологический `contextLoads()` в обоих (нужен живой PostgreSQL на `:5440`); `:common` без тестов (нет junit-зависимостей).
+
 ## Local Development
 
 ```bash
