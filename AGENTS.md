@@ -126,7 +126,7 @@ docker compose -f docker-compose.local.yml up -d
 
 ```
 Exchange: user-exchange (topic)
-  → mail-notification-queue: user.registration.email, user.password.reset, user.account.locked, user.login.email (Уведомление о входе: email, IP, user-agent, город по IP)
+  → mail-notification-queue: user.registration.email, user.password.reset, user.account.locked, user.login.email (Уведомление о входе: email, IP, user-agent, город по IP), user.welcome.email (Приветственное письмо при первом входе через OAuth-провайдера, когда аккаунт создаётся: email, username)
   → mail-email-change-init-queue: user.email.change.init
   → mail-email-change-new-queue: user.email.change.new
   → mail-email-change-done-queue: user.email.change.done
