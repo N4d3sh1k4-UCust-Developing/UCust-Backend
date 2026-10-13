@@ -673,6 +673,8 @@
                   "name": { "type": "string", "required": true, "constraints": "2-100" },
                   "industry": { "type": "Industry enum", "required": true },
                   "city": { "type": "string", "required": true, "constraints": "max 50" },
+                  "region": { "type": "string", "required": false, "constraints": "max 100", "description": "Регион/область" },
+                  "country": { "type": "string", "required": false, "constraints": "max 100", "description": "Страна; в payload AI по умолчанию 'Россия'" },
                   "description": { "type": "string", "required": false, "constraints": "max 2000" },
                   "targetAudience": { "type": "string", "required": false, "constraints": "max 500" },
                   "toneOfVoice": { "type": "ToneOfVoice enum", "required": true },
@@ -691,7 +693,7 @@
                 "response": "ProjectResponse",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<ProjectResponse> — созданный проект. Квота проектов здесь НЕ инкрементится, 402 невозможен. Событие project.created публикуется в RabbitMQ (best-effort)." },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ProjectRequest: name 2..100, industry и toneOfVoice обязательны, city max 50, description max 2000, targetAudience max 500, brandProfile max 100000; каскадом socialLinks.instagram без https:// и businessHours с close<=open" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid ProjectRequest: name 2..100, industry и toneOfVoice обязательны, city max 50, region max 100, country max 100, description max 2000, targetAudience max 500, brandProfile max 100000; каскадом socialLinks.instagram без https:// и businessHours с close<=open" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при сохранении проекта" }
                   ]
@@ -732,6 +734,8 @@
                   "name": { "type": "string", "required": false, "constraints": "2-100" },
                   "industry": { "type": "Industry enum", "required": false },
                   "city": { "type": "string", "required": false, "constraints": "max 50" },
+                  "region": { "type": "string", "required": false, "constraints": "max 100" },
+                  "country": { "type": "string", "required": false, "constraints": "max 100" },
                   "description": { "type": "string", "required": false, "constraints": "max 2000" },
                   "targetAudience": { "type": "string", "required": false, "constraints": "max 500" },
                   "toneOfVoice": { "type": "ToneOfVoice enum", "required": false },
@@ -816,7 +820,7 @@
                 "note": "Частичное обновление: null-поля не трогаются. Набор полей (в т.ч. socialLinks, businessHours, brandProfile) идентичен владельческому PATCH.",
                 "responses": [
                     { "status": 200, "description": "ProjectResponse с применёнными изменениями" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateProjectRequest нарушены ограничения (name 2..100, city ≤50, description ≤2000, targetAudience ≤500, brandProfile ≤100000)" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateProjectRequest нарушены ограничения (name 2..100, city ≤50, region ≤100, country ≤100, description ≤2000, targetAudience ≤500, brandProfile ≤100000)" },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
                     { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
@@ -1096,6 +1100,8 @@
                   "targetAudience": { "type": "string", "required": false },
                   "toneOfVoice": { "type": "string", "required": false },
                   "city": { "type": "string", "required": false },
+                  "region": { "type": "string", "required": false, "description": "Регион/область" },
+                  "country": { "type": "string", "required": false, "description": "Страна; по умолчанию 'Россия'" },
                   "currentMonth": { "type": "string", "required": false },
                   "currentYear": { "type": "int", "required": false }
                 },
@@ -1412,7 +1418,7 @@
               {
                 "method": "POST",
                 "path": "/api/v0/orchestration/generate",
-                "summary": "Сгенерировать пост (проверка и инкремент квоты 'post'; синхронный вызов Единого Шлюза Оркестратора; payload обогащается структурированными flat-ключами из проекта: company_name/niche/.../usp/key_benefits/brand_goals/products_catalog; брендбук индексируется в RAG (/api/v1/ai/rag/ingest))",
+                "summary": "Сгенерировать пост (проверка и инкремент квоты 'post'; синхронный вызов Единого Шлюза Оркестратора; payload обогащается структурированными flat-ключами из проекта: company_name/niche/.../usp/key_benefits/brand_goals/products_catalog; в payload также уходят city/region/country, country по умолчанию 'Россия'; брендбук индексируется в RAG (/api/v1/ai/rag/ingest))",
                 "auth": "Bearer",
                 "requestBody": {
                   "projectId": { "type": "UUID", "required": true },
@@ -1427,7 +1433,9 @@
                   "targetPlatforms": { "type": "string[]", "description": "VK, TELEGRAM, ...", "required": false },
                   "rubric": { "type": "string", "description": "напр. MENU_UPDATE", "required": false },
                   "primaryCta": { "type": "string", "required": false },
-                  "targetActionLink": { "type": "string", "required": false }
+                  "targetActionLink": { "type": "string", "required": false },
+                  "region": { "type": "string", "required": false, "description": "Регион/область; значение из запроса приоритетнее данных проекта" },
+                  "country": { "type": "string", "required": false, "description": "Страна; значение из запроса приоритетнее данных проекта, по умолчанию 'Россия'" }
                 },
                 "response": "PostResponse",
                 "errorResponses": "402 PAYMENT_REQUIRED QUOTA_EXCEEDED (исчерпана квота 'post'); 502 AI_GENERATION_FAILED",
