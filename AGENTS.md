@@ -163,12 +163,12 @@ Exchange: user-exchange (topic)
 ### ucust-dev repo
 - `DB_PASSWORD`
 - `JWT_SECRET_ACCESS`
-- `GEO_API_URL` (geo-сервис для claim `city`, напр. `http://ip-api.com/json/{ip}?lang=ru&fields=status,country,city`; prod-строгий)
+- `GEO_API_URL` (geo-сервис для claim `city` и таймзоны письма, напр. `http://ip-api.com/json/{ip}?lang=ru&fields=status,country,city,timezone`; prod-строгий)
 - `SERVER_TAILSCALE_IP`
 - `AI_SERVICE_URI` (external generative AI endpoint)
 - `AI_ORCHESTRATOR_ENDPOINT` (Единый Шлюз Оркестратора, напр. `http://10.0.0.2:8000`)
 - `INTERNAL_API_SECRET` (общий секрет для заголовка `X-Internal-Secret`; бэкенд и AI-контур)
-- `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SSL`, `MAIL_FROM` (SMTP; if unset — Mailtrap defaults, MAIL_SSL=false, MAIL_FROM=MAIL_USERNAME)
+- `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SSL`, `MAIL_FROM` (SMTP; if unset — Mailtrap defaults, MAIL_SSL=false, MAIL_FROM=MAIL_USERNAME), `MAIL_FROM_NAME` (человекочитаемое имя отправителя в `From`, дефолт `UCust`)
 
 ### ucust-dev repo (server .env, not GitHub)
 - `QUOTA_FREE_UNLIMITED` — если `true`, FREE-тариф в billing становится безлимитным (posts/projects/aiGenerations=-1) идемпотентно при каждом старте. Docker-дефолт `false`, локальный dev-профиль — `true`. Для презентации задать `QUOTA_FREE_UNLIMITED=true` в .env на демо-сервере.
