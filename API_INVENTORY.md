@@ -14,8 +14,8 @@
 (`security-service-public`, `billing-tariffs-public`, `ai-callback-public`), а `/tariffs/**`
 дополнительно закрыт `hasRole("ADMIN")` на стороне billing.
 
-**Итого через gateway:** 103 API-метода (33 security + 7 user + 11 business + 16 billing + 36 GOS).
-**Admin-методов с `ROLE_ADMIN`: 41** (27 было + P0 2026-10-07 + P1 2026-10-08: биллинг 6, проекты 2, посты 3, задачи 3).
+**Итого через gateway:** 118 API-методов (33 security + 7 user + 11 business + 16 billing + 36 GOS + 15 content).
+**Admin-методов с `ROLE_ADMIN`: 52** (27 было + P0 2026-10-07 + P1 2026-10-08: биллинг 6, проекты 2, посты 3, задачи 3 + content 2026-10-10: FAQ 3, documents 3, footer 3, brand 2).
 
 ---
 
@@ -65,13 +65,15 @@
 | 40 | POST | `/api/v0/admin/orchestration/tasks/{id}/retry` | Перезапуск упавшей задачи: сброс ошибки, новый плейсхолдер, фоновая генерация → 202 `AsyncGenerateResponse`; COMPLETED / in-flight — 409 `TASK_ALREADY_COMPLETED`/`TASK_IN_FLIGHT`; нет — 404 | GOS |
 | 41 | DELETE | `/api/v0/admin/orchestration/tasks/{id}` | Удаление задачи: снятие незаполненных заглушек, готовые посты сохраняются → 204; in-flight — 409 | GOS |
 
+**content-service (2026-10-10, см. §8):** 11 admin-эндпоинтов — FAQ (3), documents (3), footer (3), brand (2).
+
 **Тарифы (не под `/admin/**`, но с ролью):** `GET /api/v0/tariffs[/{id}]` — публичный
 (`billing-tariffs-public`, GET-only, заголовки `X-User-Id`/`X-User-Roles` срезаются);
 `POST/PUT/DELETE /api/v0/tariffs[/{id}]` — через `billing-tariffs-admin` (auth-фильтр gateway)
 **и** `hasRole("ADMIN")` в `billing-service SecurityConfig`. Это баги §2 №1 и №7.
 
 **Инфра-роуты за `adminAuthFilter`** (ROLE_ADMIN + JWT): `GET /v3/api-docs/swagger-config`,
-`/admin/swagger/**`, `/admin/api-docs/{security|user|business|billing|generative-orchestration-service}`,
+`/admin/swagger/**`, `/admin/api-docs/{security|user|business|billing|generative-orchestration-service|content-service}`,
 `/admin/rabbit/**`, `/admin/minio/**`, `/admin/monitoring/**`.
 
 **Не роутятся через gateway (404):** `GET /users/check-me` (security),
@@ -317,3 +319,36 @@
 - **Сознательно НЕ сделано:** `@Scheduled`-автосброс квот по `nextResetDate` (в billing нет ни одного;
   ручной reset работает); range-фильтры `from`/`to` в списке постов; история изменений подписки;
   списки `channel/analysis` и `analysis` (self-only).
+
+---
+
+## 8. content-service — контент сайта (2026-10-10)
+
+Новый сервис `content-service` (`:8108`, DB `content_service_db`, MinIO-бакет `content-service`)
+заменил фронтовые моки FAQ/юридических документов/футера/брендбука. 4 публичных + 11 admin-эндпоинтов.
+
+**Публичное чтение** (роут gateway `content-service-public`, stripPrefix(2), `X-User-Id`/`X-User-Roles` срезаются):
+- `GET /api/v0/content/faq` → `FaqItemResponse[] {id, order, question, answer, enabled}`;
+- `GET /api/v0/content/documents` → `LegalDocumentResponse[] {id, title, url, order, updatedAt}`;
+- `GET /api/v0/content/footer` → `FooterCardResponse[] {id, order, title, items: FooterItemResponse[]}`;
+- `GET /api/v0/content/brand` → `BrandAssetsResponse {logoUrl, bimiSvgUrl}`.
+
+**Admin** (роут `content-service-admin` → `/admin/content/**`, `hasRole("ADMIN")` в `SecurityConfig`):
+
+| # | Метод | Путь через gateway | Что делает |
+|---|---|---|---|
+| 1 | POST | `/api/v0/admin/content/faq` | Создать вопрос FAQ → 201 |
+| 2 | PATCH | `/api/v0/admin/content/faq/{id}` | Обновить вопрос/ответ/порядок/`enabled` |
+| 3 | DELETE | `/api/v0/admin/content/faq/{id}` | Удалить → 204 |
+| 4 | POST | `/api/v0/admin/content/documents` | Загрузить PDF (multipart `file` + `title`, `order?`) в MinIO → 201 |
+| 5 | PATCH | `/api/v0/admin/content/documents/{id}` | Обновить `title`/`order` |
+| 6 | DELETE | `/api/v0/admin/content/documents/{id}` | Удалить документ + объект MinIO → 204 |
+| 7 | POST | `/api/v0/admin/content/footer` | Создать карточку футера (`title` + `items[]`) |
+| 8 | PATCH | `/api/v0/admin/content/footer/{id}` | Обновить карточку/пункты |
+| 9 | DELETE | `/api/v0/admin/content/footer/{id}` | Удалить → 204 |
+| 10 | PUT | `/api/v0/admin/content/brand/logo` | Загрузить логотип (multipart `file`) |
+| 11 | PUT | `/api/v0/admin/content/brand/bimi` | Загрузить BIMI-SVG (multipart `file`) |
+
+PDF-документы и бренд-ассеты раздаются публичным gateway-роутом `/s3/**` (target `minio.s3.uri`).
+Сиды FAQ/футера/брендбука — `DataInitializer`. Тестов в сервисе пока нет (нет каталога `src/test`);
+сборка `content-service` — `BUILD SUCCESSFUL`.

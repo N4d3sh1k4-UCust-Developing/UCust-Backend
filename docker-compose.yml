@@ -94,6 +94,26 @@ services:
         limits:
           memory: 512M
 
+  content-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/content-service:latest
+    container_name: content-service-ucust
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx384m -Xms192m
+      - DB_PASSWORD=${DB_PASSWORD}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
+      - CONTENT_MINIO_ACCESS_KEY=${CONTENT_MINIO_ACCESS_KEY:-content-service-user}
+      - CONTENT_MINIO_SECRET_KEY=${CONTENT_MINIO_SECRET_KEY:-ct-strong-pass}
+      - CONTENT_MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.n4d3sh1k4.site/s3/content-service}
+    networks:
+      - ucust-net
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
   notification-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/notification-service:latest
     container_name: notification-service-ucust

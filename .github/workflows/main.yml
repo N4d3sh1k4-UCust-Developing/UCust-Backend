@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api-gateway, security-service, user-service, business-service, notification-service, billing-service, generative-orchestration-service]
+        service: [api-gateway, security-service, user-service, business-service, notification-service, billing-service, generative-orchestration-service, content-service]
 
     permissions:
       contents: read
@@ -84,7 +84,7 @@ jobs:
           host: ${{ secrets.SERVER_TAILSCALE_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: DB_PASSWORD, JWT_SECRET_ACCESS, SERVER_TAILSCALE_IP, YANDEX_CLIENT_ID, YANDEX_CLIENT_SECRET, VK_CLIENT_ID, VK_CLIENT_SECRET, SUPPORT_EMAIL, FRONTEND_URL, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD, GEO_API_URL, AI_SERVICE_URI, AI_ORCHESTRATOR_ENDPOINT, INTERNAL_API_SECRET, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_SSL, MAIL_FROM, MAIL_FROM_NAME
+          envs: DB_PASSWORD, JWT_SECRET_ACCESS, SERVER_TAILSCALE_IP, YANDEX_CLIENT_ID, YANDEX_CLIENT_SECRET, VK_CLIENT_ID, VK_CLIENT_SECRET, SUPPORT_EMAIL, FRONTEND_URL, DEFAULT_ADMIN_EMAIL, DEFAULT_ADMIN_PASSWORD, GEO_API_URL, AI_SERVICE_URI, AI_ORCHESTRATOR_ENDPOINT, INTERNAL_API_SECRET, MAIL_HOST, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_SSL, MAIL_FROM, MAIL_FROM_NAME, CONTENT_MINIO_ACCESS_KEY, CONTENT_MINIO_SECRET_KEY, CONTENT_MINIO_PUBLIC_BASE_URL
           script: |
             cd ~/projects/ucust
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -114,3 +114,6 @@ jobs:
           MAIL_SSL: ${{ secrets.MAIL_SSL }}
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
           MAIL_FROM_NAME: ${{ secrets.MAIL_FROM_NAME }}
+          CONTENT_MINIO_ACCESS_KEY: ${{ secrets.CONTENT_MINIO_ACCESS_KEY }}
+          CONTENT_MINIO_SECRET_KEY: ${{ secrets.CONTENT_MINIO_SECRET_KEY }}
+          CONTENT_MINIO_PUBLIC_BASE_URL: ${{ secrets.CONTENT_MINIO_PUBLIC_BASE_URL }}

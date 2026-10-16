@@ -24,7 +24,11 @@
         "/api/v0/oauth2/**",
         "/api/v0/login/oauth2/**",
         "/api/v0/tariffs",
-        "/api/v0/tariffs/{id}"
+        "/api/v0/tariffs/{id}",
+        "/api/v0/content/faq",
+        "/api/v0/content/documents",
+        "/api/v0/content/footer",
+        "/api/v0/content/brand"
       ]
     },
     "responseContract": {
@@ -862,7 +866,7 @@
                 "path": "/api/v0/tariffs",
                 "summary": "Все тарифы",
                 "auth": "public",
-                "response": "TariffResponse[]",
+                "response": "TariffResponse[] { id, name, cost, description, features: string[], ctaText, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<TariffResponse[]> — публичный эндпоинт, gateway-роут без authFilter, в сервисе GET /tariffs/** permitAll" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при чтении тарифов" }
@@ -874,7 +878,7 @@
                 "summary": "Тариф по ID",
                 "auth": "public",
                 "pathParams": { "id": "UUID" },
-                "response": "TariffResponse",
+                "response": "TariffResponse { id, name, cost, description, features: string[], ctaText, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<TariffResponse> — публичный эндпоинт, 401/403 неприменимы" },
                     { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким id нет" },
@@ -889,6 +893,9 @@
                 "requestBody": {
                   "name": { "type": "string", "required": true },
                   "cost": { "type": "BigDecimal", "required": true },
+                  "description": { "type": "string", "required": true, "constraints": "короткое описание тарифа (маркетинговое, буквально ~3 слова)" },
+                  "features": { "type": "string[]", "required": false, "description": "Пункты возможностей тарифа: [\"1 бизнес\", \"До 12 постов в месяц\", \"Все соцсети без ограничений\", ...]" },
+                  "ctaText": { "type": "string", "required": true, "constraints": "надпись на кнопке (напр. «Попробовать бесплатно»)" },
                   "projects": { "type": "int", "required": true },
                   "posts": { "type": "int", "required": true },
                   "chatBotType": { "type": "ChatBotType enum", "required": true },
@@ -913,6 +920,9 @@
                 "requestBody": {
                   "name": { "type": "string", "required": false },
                   "cost": { "type": "BigDecimal", "required": false },
+                  "description": { "type": "string", "required": false },
+                  "features": { "type": "string[]", "required": false },
+                  "ctaText": { "type": "string", "required": false },
                   "projects": { "type": "Integer", "required": false },
                   "posts": { "type": "Integer", "required": false },
                   "chatBotType": { "type": "ChatBotType enum", "required": false },
@@ -920,7 +930,7 @@
                   "analyticsType": { "type": "AnalyticsType enum", "required": false },
                   "aiGenerations": { "type": "Integer", "required": false }
                 },
-                "response": "TariffResponse",
+                "response": "TariffResponse { id, name, cost, description, features: string[], ctaText, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<TariffResponse> — обновлённый тариф" },
                     { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateTariffRequest: cost/projects/posts/aiGenerations отрицательные" },
@@ -1694,6 +1704,304 @@
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "проект не найден или принадлежит другому пользователю" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject не UUID или ошибка БД" }
+                  ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "content-service",
+        "internalUri": "http://localhost:8108",
+        "swagger": "/admin/api-docs/content-service",
+        "controllers": {
+          "FaqController": {
+            "tag": "FAQ",
+            "basePath": "/content/faq",
+            "gatewayPattern": "/api/v0/content/faq (public)",
+            "note": "Публичное чтение /api/v0/content/faq (permitAll). Запись — /api/v0/admin/content/faq/** (JWT + ROLE_ADMIN).",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/content/faq",
+                "summary": "Список вопросов FAQ",
+                "auth": "public",
+                "response": "FaqItem[] { id, order, question, answer, enabled }",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<FaqItem[]> — только enabled=true, сортировка по order" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "DocumentController": {
+            "tag": "Правовые документы",
+            "basePath": "/content/documents",
+            "gatewayPattern": "/api/v0/content/documents (public)",
+            "note": "PDF-документы (оферта, политика, согласие). Файл хранится в MinIO (бакет content-service), url — публичная ссылка через gateway-роут /s3/content-service/**.",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/content/documents",
+                "summary": "Список правовых документов",
+                "auth": "public",
+                "response": "LegalDocument[] { id, title, url, order, updatedAt }",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<LegalDocument[]> — сортировка по order; url = ссылка на PDF (/s3/content-service/documents/...)" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "FooterController": {
+            "tag": "Футер",
+            "basePath": "/content/footer",
+            "gatewayPattern": "/api/v0/content/footer (public)",
+            "note": "Карточки-группы контактов для футера (напр. «Контакты», «Соцсети»), внутри — строки-контакты.",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/content/footer",
+                "summary": "Карточки футера с контактами",
+                "auth": "public",
+                "response": "FooterCard[] { id, order, title, items: FooterItem[] }; FooterItem { label, value, href, icon }",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<FooterCard[]> — сортировка по order, контакты внутри карточек" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "BrandController": {
+            "tag": "Бренд-ассеты",
+            "basePath": "/content/brand",
+            "gatewayPattern": "/api/v0/content/brand (public)",
+            "note": "Логотип сайта и (опционально) SVG для BIMI — email-аватар отправителя.",
+            "endpoints": [
+              {
+                "method": "GET",
+                "path": "/api/v0/content/brand",
+                "summary": "Логотип и BIMI-ассет",
+                "auth": "public",
+                "response": "BrandAssets { logoUrl, bimiSvgUrl }",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<BrandAssets> — logoUrl (PNG/SVG), bimiSvgUrl может быть null" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              }
+            ]
+          },
+          "ContentAdminController": {
+            "tag": "Админ: контент сайта",
+            "basePath": "/admin/content",
+            "gatewayPattern": "/api/v0/admin/content/**, JWT + ROLE_ADMIN",
+            "note": "Запись статического контента (FAQ, документы, футер, бренд). Все эндпоинты требуют ROLE_ADMIN.",
+            "endpoints": [
+              {
+                "method": "POST",
+                "path": "/api/v0/admin/content/faq",
+                "summary": "Создать вопрос FAQ (админ)",
+                "auth": "Bearer (admin)",
+                "requestBody": {
+                  "question": { "type": "string", "required": true, "constraints": "1..500" },
+                  "answer": { "type": "string", "required": true, "constraints": "1..5000" },
+                  "order": { "type": "int", "required": false, "default": 0 },
+                  "enabled": { "type": "boolean", "required": false, "default": true }
+                },
+                "response": "201 Created FaqItem",
+                "responses": [
+                    { "status": 201, "description": "ApiResponse<FaqItem> — созданный вопрос" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid FaqRequest: пустой question или answer" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/admin/content/faq/{id}",
+                "summary": "Обновить вопрос FAQ (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "id": "UUID" },
+                "requestBody": {
+                  "question": { "type": "string", "required": false, "constraints": "1..500" },
+                  "answer": { "type": "string", "required": false, "constraints": "1..5000" },
+                  "order": { "type": "int", "required": false },
+                  "enabled": { "type": "boolean", "required": false }
+                },
+                "response": "FaqItem",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<FaqItem> — обновлённый вопрос (частичное обновление)" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "переданное question/answer нарушает ограничения" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "вопроса с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/admin/content/faq/{id}",
+                "summary": "Удалить вопрос FAQ (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "id": "UUID" },
+                "response": "204 No Content",
+                "responses": [
+                    { "status": 204, "description": "Вопрос удалён. Тело пустое." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "вопроса с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/admin/content/documents",
+                "summary": "Загрузить правовой документ (админ, multipart)",
+                "auth": "Bearer (admin)",
+                "requestBody": {
+                  "file": { "type": "file (PDF)", "required": true, "constraints": "application/pdf, до 10 МБ" },
+                  "title": { "type": "string", "required": true, "constraints": "1..200" },
+                  "order": { "type": "int", "required": false, "default": 0 }
+                },
+                "response": "201 Created LegalDocument",
+                "responses": [
+                    { "status": 201, "description": "ApiResponse<LegalDocument> — созданный документ; url = /s3/content-service/documents/{uuid}.pdf" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть file отсутствует" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "пустой title" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 413, "code": "FILE_TOO_LARGE", "when": "файл больше лимита (10 МБ)" },
+                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не application/pdf или сигнатура не PDF" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/admin/content/documents/{id}",
+                "summary": "Обновить метаданные документа (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "id": "UUID" },
+                "requestBody": {
+                  "title": { "type": "string", "required": false, "constraints": "1..200" },
+                  "order": { "type": "int", "required": false }
+                },
+                "response": "LegalDocument",
+                "note": "Меняются только title/order; сам файл не заменяется — для новой версии загружается новый документ.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<LegalDocument> — обновлённые метаданные" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "пустой title" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "документа с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/admin/content/documents/{id}",
+                "summary": "Удалить правовой документ (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "id": "UUID" },
+                "response": "204 No Content",
+                "responses": [
+                    { "status": 204, "description": "Документ удалён (строка БД + объект в MinIO, best-effort). Тело пустое." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "документа с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "POST",
+                "path": "/api/v0/admin/content/footer",
+                "summary": "Создать карточку футера (админ)",
+                "auth": "Bearer (admin)",
+                "requestBody": {
+                  "title": { "type": "string", "required": true, "constraints": "1..200" },
+                  "order": { "type": "int", "required": false, "default": 0 },
+                  "items": { "type": "FooterItem[]", "required": true, "description": "Строки-контакты: { label, value, href?, icon? }" }
+                },
+                "response": "201 Created FooterCard",
+                "responses": [
+                    { "status": 201, "description": "ApiResponse<FooterCard> — созданная карточка с контактами" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid FooterCardRequest: пустой title или пустой список items" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PATCH",
+                "path": "/api/v0/admin/content/footer/{id}",
+                "summary": "Обновить карточку футера (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "id": "UUID" },
+                "requestBody": {
+                  "title": { "type": "string", "required": false, "constraints": "1..200" },
+                  "order": { "type": "int", "required": false },
+                  "items": { "type": "FooterItem[]", "required": false, "description": "Полная замена списка контактов карточки" }
+                },
+                "response": "FooterCard",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<FooterCard> — обновлённая карточка (items передан — полная замена)" },
+                    { "status": 400, "code": "VALIDATION_ERROR", "when": "переданный title/items нарушает ограничения" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "карточки с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "DELETE",
+                "path": "/api/v0/admin/content/footer/{id}",
+                "summary": "Удалить карточку футера (админ)",
+                "auth": "Bearer (admin)",
+                "pathParams": { "id": "UUID" },
+                "response": "204 No Content",
+                "responses": [
+                    { "status": 204, "description": "Карточка удалена. Тело пустое." },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 404, "code": "NOT_FOUND", "when": "карточки с таким id нет" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PUT",
+                "path": "/api/v0/admin/content/brand/logo",
+                "summary": "Загрузить логотип сайта (админ, multipart)",
+                "auth": "Bearer (admin)",
+                "requestBody": {
+                  "file": { "type": "file (PNG/SVG)", "required": true, "constraints": "image/png или image/svg+xml, до 5 МБ" }
+                },
+                "response": "BrandAssets",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<BrandAssets> — logoUrl обновлён" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть file отсутствует" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не PNG/SVG" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен или ошибка БД" }
+                  ]
+              },
+              {
+                "method": "PUT",
+                "path": "/api/v0/admin/content/brand/bimi",
+                "summary": "Загрузить SVG для BIMI (админ, multipart)",
+                "auth": "Bearer (admin)",
+                "requestBody": {
+                  "file": { "type": "file (SVG)", "required": true, "constraints": "image/svg+xml, SVG Tiny 1.2 Portable/Secure, квадрат 1:1" }
+                },
+                "response": "BrandAssets",
+                "note": "BIMI-требования: DMARC p=quarantine/reject, SVG с baseProfile=\"tiny-ps\", HTTPS-доступность. Yandex BIMI не поддерживает — только логотип в DNS default._bimi.",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<BrandAssets> — bimiSvgUrl обновлён" },
+                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть file отсутствует" },
+                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
+                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
+                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не image/svg+xml" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен или ошибка БД" }
                   ]
               }
             ]

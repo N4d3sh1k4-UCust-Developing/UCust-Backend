@@ -22,3 +22,6 @@
 [submodule "billing-service"]
 	path = billing-service
 	url = https://github.com/N4d3sh1k4-UCust-Developing/billing-service.git
+[submodule "content-service"]
+	path = content-service
+	url = https://github.com/N4d3sh1k4-UCust-Developing/content-service.git

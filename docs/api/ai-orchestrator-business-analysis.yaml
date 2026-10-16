@@ -1,0 +1,1096 @@
+openapi: 3.1.0
+info:
+  title: UCust — AI Orchestrator · Business Analysis (target contract)
+  version: "1.0.0-draft"
+  summary: Целевой контракт Единого Шлюза Оркестратора для онбординга бизнеса.
+  description: |
+    # Назначение
+
+    Это **ТЗ контуру**: расширенный ответ на онбординг бизнеса. Пользователь при создании
+    бизнеса отправляет ссылку на сайт, перечень привязанных соцсетей (@хэндлы/ссылки) и
+    документы. Контур должен вернуть не «несколько полей», а полное **досье бренда**:
+    все бизнес-поля, разбор сайта/документов, парс привязанных соцсетей, конкурентный
+    анализ со сравнением, SWOT и AI-аналитику (оценки, рекомендации, KPI).
+
+    # Ключевые принципы
+
+    1. **Одна форма на все шаги.** Онбординг может выполняться несколькими запросами/пушами
+       (`business_onboard` → `parse_socials` → `analyze_competitors` → `brand_analytics`).
+       Каждый ответ — тот же `BusinessDossier`, но *частичный*: заполнены только готовые блоки,
+       в `stages` указано, что сделано/в процессе/упало, `partial=true`.
+    2. **Идемпотентная домиксовка.** Бэкенд домешивает блоки по `session_id` + `stage`.
+       Повторный ответ с теми же данными не должен ломать результат (дедуп по стабильным ключам).
+    3. **Типизация + толерантность.** Все поля опциональны; блоки с фикс. именами и
+       машинно-читаемыми enum-кодами (`industry_code`, `tone_of_voice_code`), рядом — `*_raw`
+       (человеческий ярлык). Для списков — стабильные ключи дедупа
+       (`competitors[].domain`, `socials.channels[].handle`, `socials.channels[].content.top_posts[].external_id`).
+    4. **Провенанс обязателен.** `evidence.sources`, `evidence.field_confidence`,
+       `evidence.raw` — откуда взято значение (сайт/документ/соцсеть), чтобы показать в UI и
+       переиндексировать в RAG.
+    5. **`null` ≠ пусто.** `null` = не найдено/неизвестно; `""`/`[]` = найдено, но пусто.
+    6. **Обратная совместимость.** Бэкенд продолжает понимать плоские алиасы
+       (`company_name`, `niche`, `usp`, `raw_sources.website`, `extracted_documents` и т.п.),
+       но целевой ответ — эта схема.
+
+    # Транспорт
+
+    Вызов — `POST /api/v1/orchestrator/execute` (`sync_backend: true`), ответ синхронный
+    и/или асинхронный пуш на `POST /api/v1/ai/callback`. Оба несут `BusinessDossier` в `data`.
+    Аутентификация — заголовок `X-Internal-Secret` (общий секрет).
+
+    # Что уже есть у бэкенда (куда ложится ответ)
+
+    | Блок контура | Куда на бэкенде |
+    | :--- | :--- |
+    | `business.*` | Project (`name, industry, city, region, country, street, house, description, targetAudience, social_links, business_hours`) через `ProjectPatch` |
+    | `brand/offer/audience/market/swot/analytics` | JSON-колонка `Project.brandProfile` |
+    | `socials.*` | домен `ChannelAnalysis`/`Post`/`PostStatistics` + RAG `channel_context:{projectId}` |
+    | `evidence.raw` | RAG-индекс брендбука (`doc_id=brand_profile:{projectId}`) |
+    | `warnings` / `needs_input` | ответ `AnalysisResponse` / UI онбординга |
+  contact:
+    name: UCust Backend Team
+
+servers:
+  - url: http://11.0.0.2:8000
+    description: Контур, внешний AI-сервер.
+
+security:
+  - InternalSecret: []
+
+tags:
+  - name: orchestrator
+  - name: callback
+
+paths:
+  /api/v1/orchestrator/execute:
+    post:
+      tags: [orchestrator]
+      summary: Запуск задачи (в т.ч. стадии онбординга бизнеса)
+      description: |
+        Единая точка входа. Для онбординга используются стадии: `business_onboard`
+        (сайт + документы), `parse_socials` / `parse_telegram` / `parse_vk` (по каналу),
+        `analyze_competitors`, `brand_analytics`. Алиас: `POST /api/v1/task/execute`.
+      operationId: executeTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrchestratorExecuteRequest'
+            examples:
+              onboard:
+                summary: Стадия 1 — бизнес из сайта/документов
+                value:
+                  task_type: business_onboard
+                  user_id: 22ee8924-b34f-4a69-b0e0-daac77463530
+                  session_id: an_7f3c1e2a
+                  parent_session_id: an_7f3c1e2a
+                  sync_backend: true
+                  payload:
+                    company_name: Небольшая кофейня
+                    urls: ["https://example-coffee.ru"]
+                    socials: ["telegram", "vk", "instagram"]
+                    documents:
+                      - "data:application/pdf;base64,JVBERi0xLjQK..."
+                    raw_notes: specialty-кофе, своя обжарка
+                    locale: ru-RU
+                    currency: RUB
+              socials:
+                summary: Стадия 2 — парс привязанных соцсетей
+                value:
+                  task_type: parse_socials
+                  user_id: 22ee8924-b34f-4a69-b0e0-daac77463530
+                  session_id: an_7f3c1e2a
+                  parent_session_id: an_7f3c1e2a
+                  sync_backend: true
+                  payload:
+                    channels:
+                      - { channel: telegram, handle: "@example_coffee", limit: 100 }
+                      - { channel: vk, handle: "example_coffee", limit: 100 }
+      responses:
+        '200':
+          description: Результат задачи (досье бренда или его стадия).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestratorResponse'
+              examples:
+                stage1:
+                  $ref: '#/components/examples/BusinessOnboardResult'
+                socials:
+                  $ref: '#/components/examples/ParseSocialsResult'
+        '400':
+          description: Невалидный payload / неизвестная задача.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestratorResponse'
+        '502':
+          description: Внутренняя ошибка стадии; контур вернул status=failed.
+
+  /api/v1/ai/callback:
+    post:
+      tags: [callback]
+      summary: Auto-push результата (sync_backend=true)
+      description: |
+        Контур пушит результат, если отдал его асинхронно. `session_id`/`task_id` = наша
+        задача/анализ. `data` = `BusinessDossier` (частичный допустим). Для стадий используйте
+        поле `stage`/`stages`. Повторные пуши должны быть идемпотентны на стороне контура
+        (не слать дубли), но бэкенд всё равно дедуплицирует.
+      operationId: aiCallback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiCallbackRequest'
+            examples:
+              analytics:
+                summary: Стадия 4 — производная аналитика
+                value:
+                  task_type: brand_analytics
+                  session_id: an_7f3c1e2a
+                  status: success
+                  data:
+                    schema_version: "1.0"
+                    status: success
+                    stage: brand_analytics
+                    partial: false
+                    analytics:
+                      scores: { positioning_strength: 62, digital_presence: 41, content_maturity: 30, competitive_position: 55 }
+      responses:
+        '200':
+          description: "{ status: \"accepted\" }"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, examples: ["accepted"] }
+
+components:
+  securitySchemes:
+    InternalSecret:
+      type: apiKey
+      in: header
+      name: X-Internal-Secret
+      description: Общий секрет бэкенда и AI-контура (`INTERNAL_API_SECRET`).
+
+  schemas:
+
+    # ─────────────────────────── transport ───────────────────────────
+
+    OrchestratorExecuteRequest:
+      type: object
+      required: [task_type, user_id, session_id, payload]
+      properties:
+        task_type: { $ref: '#/components/schemas/TaskType' }
+        user_id: { type: string, format: uuid }
+        session_id:
+          type: string
+          description: Наш идентификатор задачи/анализа. Для многошагового онбординга один и тот же на всех стадиях.
+        parent_session_id:
+          type: string
+          description: Необязательно. Корневой `session_id` онбординга, если стадии имеют свои id.
+        sync_backend: { type: boolean, default: true }
+        payload:
+          type: object
+          additionalProperties: true
+          description: |
+            Зависит от `task_type`. Для бизнес-стадий:
+            `company_name`, `urls[]`, `socials[]` (channel ids), `documents[]` (data-URL),
+            `raw_notes`, `channels[{channel,handle,limit}]`, `locale`, `currency`,
+            `fast_mode`. `brand_id`/`tenant_id` (если появятся) — внутри payload, не в envelope.
+
+    OrchestratorResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [success, partial, failed] }
+        task_type: { $ref: '#/components/schemas/TaskType' }
+        user_id: { type: string }
+        session_id: { type: string }
+        timings:
+          type: object
+          additionalProperties: { type: number }
+          description: "Тайминги стадий в секундах (напр. `{ website: 4.2, llm: 12.8 }`)."
+        data:
+          $ref: '#/components/schemas/BusinessDossier'
+        error: { type: [string, 'null'] }
+
+    AiCallbackRequest:
+      type: object
+      description: |
+        Поддерживаются обе формы v2.5.0/v2.7.0: `task_type`|`event_type`,
+        `session_id`|`task_id`, `result`|`data`.
+      properties:
+        task_type:
+          $ref: '#/components/schemas/TaskType'
+        event_type:
+          type: string
+          description: v2.7.0-алиас `task_type` (напр. `content_draft_ready`).
+        session_id: { type: string }
+        task_id: { type: string }
+        user_id: { type: string, format: uuid }
+        status: { type: string, enum: [success, partial, failed] }
+        data:
+          $ref: '#/components/schemas/BusinessDossier'
+        result:
+          $ref: '#/components/schemas/BusinessDossier'
+        timestamp: { type: number }
+
+    # ─────────────────────────── dossier root ───────────────────────────
+
+    BusinessDossier:
+      type: object
+      description: Полное «досье бренда». Все блоки опциональны (частичный ответ допустим).
+      properties:
+        schema_version: { type: string, examples: ["1.0"] }
+        revision:
+          type: integer
+          description: |
+            Монотонно растущий номер ревизии в рамках `session_id`. Бэкенд применяет блоки
+            только если `revision` больше последнего применённого — защита от рассинхрона
+            и «догоняющих» пушей, пришедших не по порядку.
+        status: { $ref: '#/components/schemas/DossierStatus' }
+        mode: { $ref: '#/components/schemas/DossierMode' }
+        stage: { $ref: '#/components/schemas/Stage' }
+        partial:
+          type: boolean
+          description: true — заполнены не все запрошенные блоки, будут догоняющие пуши.
+        session_id: { type: string }
+        parent_session_id: { type: string }
+        locale: { type: string, examples: ["ru-RU"] }
+        currency: { type: string, examples: ["RUB"] }
+        stages: { $ref: '#/components/schemas/StageMap' }
+        readiness: { $ref: '#/components/schemas/Readiness' }
+        business: { $ref: '#/components/schemas/BusinessProfileBlock' }
+        brand: { $ref: '#/components/schemas/BrandBlock' }
+        offer: { $ref: '#/components/schemas/OfferBlock' }
+        audience: { $ref: '#/components/schemas/AudienceBlock' }
+        market: { $ref: '#/components/schemas/MarketBlock' }
+        swot: { $ref: '#/components/schemas/SwotBlock' }
+        analytics: { $ref: '#/components/schemas/AnalyticsBlock' }
+        socials: { $ref: '#/components/schemas/SocialsBlock' }
+        evidence: { $ref: '#/components/schemas/EvidenceBlock' }
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/Warning' }
+        needs_input:
+          type: array
+          items: { $ref: '#/components/schemas/NeedsInput' }
+      examples:
+        - schema_version: "1.0"
+          status: partial
+          stage: business_onboard
+          partial: true
+          stages: { website: done, documents: done, socials: { telegram: pending, vk: pending } }
+          business: { name: "Example Coffee", industry_code: CAFE_RESTAURANT, description: "…" }
+          swot: { strengths: ["своя обжарка"], weaknesses: [], opportunities: [], threats: [] }
+
+    StageStatus:
+      type: string
+      enum: [pending, running, done, skipped, failed]
+
+    DossierStatus:
+      type: string
+      enum: [success, partial, failed]
+
+    DossierMode:
+      type: string
+      description: |
+        `full` — данных достаточно для аналитики/автогенерации;
+        `limited` — «ограниченный вид без аналитики, SWOT и т.д.» (пользователь не дал источника
+        или данных мало); фронт показывает частичное досье и просит дозаполнить.
+      enum: [full, limited]
+
+    Readiness:
+      type: object
+      description: Сигнал достаточности данных — для ветвлений «хватает ли данных для аналитики/автогенерации».
+      properties:
+        sufficient_for_analysis: { type: boolean }
+        sufficient_for_autogeneration: { type: boolean }
+        score: { type: integer, minimum: 0, maximum: 100, description: "Интегральная оценка полноты." }
+        missing:
+          type: array
+          items: { type: string }
+          description: Чего не хватает (совпадает с `needs_input[].field`).
+
+    Stage:
+      type: string
+      description: Стадия онбординга, к которой относится этот ответ.
+      enum: [business_onboard, parse_socials, analyze_competitors, brand_analytics]
+
+    StageMap:
+      type: object
+      description: Что реально сделано в этом ответе.
+      properties:
+        website: { $ref: '#/components/schemas/StageStatus' }
+        documents: { $ref: '#/components/schemas/StageStatus' }
+        socials:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/StageStatus' }
+          description: 'Карта по каналам: `{ telegram: done, instagram: failed }`.'
+        competitors: { $ref: '#/components/schemas/StageStatus' }
+        analytics: { $ref: '#/components/schemas/StageStatus' }
+      additionalProperties: { $ref: '#/components/schemas/StageStatus' }
+
+    # ─────────────────────────── business ───────────────────────────
+
+    BusinessProfileBlock:
+      type: object
+      properties:
+        name: { type: string, description: "Отображаемое имя бренда." }
+        legal_name: { type: string }
+        slogan: { type: string }
+        industry_code: { $ref: '#/components/schemas/IndustryCode' }
+        industry_raw: { type: string, description: 'Ярлык как есть, напр. "кофейня самообслуживания".' }
+        description: { type: string, maxLength: 1000 }
+        founded_year: { type: integer }
+        phone: { type: string, description: "Формат 79XXXXXXXXX (см. PhoneUtils)." }
+        email: { type: string, format: email }
+        city: { type: string }
+        region: { type: string }
+        country: { type: string }
+        street: { type: string }
+        house: { type: string }
+        social_links: { $ref: '#/components/schemas/SocialLinksBlock' }
+        business_hours: { $ref: '#/components/schemas/BusinessHoursBlock' }
+
+    SocialLinksBlock:
+      type: object
+      additionalProperties: { type: string }
+      description: |
+        Соцсети/сайт. Стандартные ключи: `website`, `telegram`, `vk`, `ok`, `instagram`,
+        `max`, `zen`, `rutube`, `avito`.
+
+    BusinessHoursBlock:
+      type: object
+      description: Соответствует `BusinessHours` business-service (единый open/close + offDays).
+      properties:
+        open_time: { type: string, examples: ["08:00"] }
+        close_time: { type: string, examples: ["21:00"] }
+        off_days:
+          type: array
+          items: { type: string, description: "DayOfWeek: MONDAY..SUNDAY" }
+        raw:
+          type: object
+          additionalProperties: { type: string }
+          description: "Необязательная расшифровка по дням, напр. {\"mon\": \"08:00-21:00\"}."
+
+    # ─────────────────────────── brand / offer / audience ───────────────────────────
+
+    BrandBlock:
+      type: object
+      properties:
+        positioning: { type: string, maxLength: 280, description: "Идёт в контур как USP." }
+        usp:
+          type: array
+          items: { type: string }
+        values:
+          type: array
+          items: { type: string }
+        tone_of_voice_code: { $ref: '#/components/schemas/ToneOfVoiceCode' }
+        tone_of_voice_raw: { type: string }
+        keywords:
+          type: array
+          items: { type: string }
+
+    OfferBlock:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/OfferItem' }
+
+    OfferItem:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        price: { type: number }
+        currency: { type: string, examples: ["RUB"] }
+        unit: { type: string, examples: ["шт", "час"] }
+
+    AudienceBlock:
+      type: object
+      properties:
+        segments:
+          type: array
+          items: { $ref: '#/components/schemas/AudienceSegment' }
+
+    AudienceSegment:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        demographics: { type: string }
+        geo: { type: string }
+        pains:
+          type: array
+          items: { type: string }
+        gains:
+          type: array
+          items: { type: string }
+        channels:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelId' }
+
+    # ─────────────────────────── market / competitors ───────────────────────────
+
+    MarketBlock:
+      type: object
+      properties:
+        geography: { type: string }
+        segment: { type: string }
+        trends:
+          type: array
+          items: { type: string }
+        competitors:
+          type: array
+          items: { $ref: '#/components/schemas/Competitor' }
+        comparison: { $ref: '#/components/schemas/ComparisonMatrix' }
+        gaps:
+          type: array
+          items: { $ref: '#/components/schemas/MarketGap' }
+
+    Competitor:
+      type: object
+      required: [name]
+      description: Ключ дедупа — `domain` (иначе `name`).
+      properties:
+        name: { type: string }
+        domain: { type: string, examples: ["competitor.ru"] }
+        url: { type: string, format: uri }
+        positioning: { type: string }
+        price_level: { type: string, enum: [low, mid, high, unknown] }
+        strengths:
+          type: array
+          items: { type: string }
+        weaknesses:
+          type: array
+          items: { type: string }
+        channels:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelId' }
+
+    ComparisonMatrix:
+      type: object
+      description: Сравнение «мы vs конкуренты» по осям.
+      properties:
+        axes:
+          type: array
+          items: { type: string, examples: ["price", "quality", "range", "service", "content_activity"] }
+        rows:
+          type: array
+          items: { $ref: '#/components/schemas/ComparisonRow' }
+
+    ComparisonRow:
+      type: object
+      required: [axis]
+      properties:
+        axis: { type: string }
+        ours: { type: string, description: "Наше значение по оси (уровень/оценка/текст)." }
+        theirs: { type: string, description: "Значение ближайшего конкурента или агрегат по рынку." }
+        advantage: { $ref: '#/components/schemas/Advantage' }
+
+    MarketGap:
+      type: object
+      properties:
+        area: { type: string }
+        opportunity: { type: string }
+
+    Advantage:
+      type: string
+      enum: [ours, theirs, parity]
+
+    # ─────────────────────────── swot ───────────────────────────
+
+    SwotBlock:
+      type: object
+      description: "Алиасы для strengths: `key_benefits`, `usp_list`."
+      properties:
+        strengths: { $ref: '#/components/schemas/SwotBlockItems' }
+        weaknesses: { $ref: '#/components/schemas/SwotBlockItems' }
+        opportunities: { $ref: '#/components/schemas/SwotBlockItems' }
+        threats: { $ref: '#/components/schemas/SwotBlockItems' }
+
+    SwotItem:
+      oneOf:
+        - type: string
+        - type: object
+          required: [text]
+          properties:
+            text: { type: string }
+            impact: { type: string, enum: [low, med, high] }
+            confidence: { type: number, minimum: 0, maximum: 1 }
+
+    SwotBlockItems:
+      type: array
+      items: { $ref: '#/components/schemas/SwotItem' }
+
+    # ─────────────────────────── analytics ───────────────────────────
+
+    AnalyticsBlock:
+      type: object
+      description: AI-производные выводы. См. раздел «Что можно просить» в описании info.
+      properties:
+        window: { $ref: '#/components/schemas/AnalyticsWindow' }
+        scores: { $ref: '#/components/schemas/AnalyticsScores' }
+        positioning_map: { $ref: '#/components/schemas/PositioningMap' }
+        recommendations:
+          type: array
+          items: { $ref: '#/components/schemas/Recommendation' }
+        content_pillars:
+          type: array
+          items: { $ref: '#/components/schemas/ContentPillar' }
+        content_plan: { $ref: '#/components/schemas/ContentPlan' }
+        channel_plan:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelPlanItem' }
+        kpi_targets: { $ref: '#/components/schemas/KpiTargets' }
+        risks:
+          type: array
+          items: { $ref: '#/components/schemas/RiskItem' }
+        quick_wins:
+          type: array
+          items: { type: string }
+
+    AnalyticsWindow:
+      type: object
+      description: Окно сбора аналитики (в бизнес-процессе — «за последний ~месяц»).
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        days: { type: integer, examples: [30] }
+
+    ContentPlan:
+      type: object
+      description: |
+        Предложение контент-плана после онбординга. Количество постов и доступный тариф —
+        ответственность бэкенда/billing; контур отдаёт только идеи и каденцию.
+      properties:
+        posts_count: { type: integer, examples: [12] }
+        cadence: { type: string, examples: ["3/нед"] }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ContentPlanItem' }
+
+    ContentPlanItem:
+      type: object
+      properties:
+        topic: { type: string }
+        format: { type: string, examples: ["photo", "text", "video"] }
+        channel: { $ref: '#/components/schemas/ChannelId' }
+        scheduled_hint: { type: string, examples: ["2026-11-02T19:00:00+03:00"] }
+        pillar: { type: string }
+
+    AnalyticsScores:
+      type: object
+      description: Оценки 0..100 с обоснованием в `rationale`.
+      properties:
+        positioning_strength: { type: integer, minimum: 0, maximum: 100 }
+        digital_presence: { type: integer, minimum: 0, maximum: 100 }
+        content_maturity: { type: integer, minimum: 0, maximum: 100 }
+        audience_fit: { type: integer, minimum: 0, maximum: 100 }
+        competitive_position: { type: integer, minimum: 0, maximum: 100 }
+        rationale:
+          type: object
+          additionalProperties: { type: string }
+
+    PositioningMap:
+      type: object
+      properties:
+        axes:
+          type: object
+          properties:
+            x: { type: string, examples: ["цена"] }
+            y: { type: string, examples: ["качество"] }
+        points:
+          type: array
+          items: { $ref: '#/components/schemas/PositioningPoint' }
+
+    PositioningPoint:
+      type: object
+      required: [entity, x, y]
+      properties:
+        entity: { type: string, examples: ["мы", "competitor.ru"] }
+        x: { type: number }
+        y: { type: number }
+
+    Recommendation:
+      type: object
+      required: [action]
+      properties:
+        area: { type: string, examples: ["контент", "прайс", "сервис"] }
+        priority: { $ref: '#/components/schemas/Priority' }
+        action: { type: string }
+        expected_impact: { type: string }
+        effort: { type: string, enum: [low, mid, high] }
+
+    ContentPillar:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        share_pct: { type: integer, minimum: 0, maximum: 100 }
+
+    ChannelPlanItem:
+      type: object
+      required: [channel, priority]
+      properties:
+        channel: { $ref: '#/components/schemas/ChannelId' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        rationale: { type: string }
+        cadence: { type: string, examples: ["3/нед"] }
+
+    KpiTargets:
+      type: object
+      properties:
+        horizon_days: { type: integer, examples: [90] }
+        followers_growth: { type: integer }
+        engagement_rate: { type: number, examples: [4.5] }
+        posts_per_week: { type: number }
+        reach: { type: integer }
+
+    RiskItem:
+      type: object
+      properties:
+        type: { type: string }
+        severity: { type: string, enum: [low, med, high] }
+        description: { type: string }
+
+    # ─────────────────────────── socials ───────────────────────────
+
+    SocialsBlock:
+      type: object
+      properties:
+        channels:
+          type: array
+          items: { $ref: '#/components/schemas/SocialChannel' }
+        summary: { $ref: '#/components/schemas/CrossChannelSummary' }
+        parse_meta: { $ref: '#/components/schemas/ParseMeta' }
+
+    SocialChannel:
+      type: object
+      required: [channel]
+      description: Ключ дедупа — `channel` + `handle`.
+      properties:
+        channel: { $ref: '#/components/schemas/ChannelId' }
+        handle: { type: string }
+        url: { type: string, format: uri }
+        verified: { type: boolean, description: "Страница/канал существует." }
+        profile: { $ref: '#/components/schemas/SocialProfile' }
+        metrics: { $ref: '#/components/schemas/SocialMetrics' }
+        content: { $ref: '#/components/schemas/SocialContent' }
+        audience:
+          type: object
+          properties:
+            geo_mix:
+              type: object
+              additionalProperties: { type: number }
+        sentiment: { $ref: '#/components/schemas/Sentiment' }
+        objections:
+          type: array
+          items: { type: string }
+
+    SocialProfile:
+      type: object
+      properties:
+        followers: { type: integer }
+        following: { type: integer }
+        posts_count: { type: integer }
+        bio: { type: string }
+        avatar_url: { type: string, format: uri }
+        category: { type: string }
+
+    SocialMetrics:
+      type: object
+      properties:
+        window_days: { type: integer, examples: [30], description: "Окно сбора метрик (последние ~30 дней)." }
+        followers: { type: integer }
+        avg_views: { type: integer }
+        avg_reach: { type: integer }
+        avg_likes: { type: integer }
+        avg_comments: { type: integer }
+        engagement_rate: { type: number }
+        posting_frequency: { type: string, examples: ["5/нед"] }
+        best_posting_time: { type: string, examples: ["19:00"] }
+        growth_30d: { type: number }
+
+    SocialContent:
+      type: object
+      properties:
+        top_topics:
+          type: array
+          items: { type: string }
+        formats_mix:
+          type: object
+          additionalProperties: { type: number }
+          examples: [{ photo: 0.7, text: 0.3 }]
+        top_posts:
+          type: array
+          items: { $ref: '#/components/schemas/SocialPostRef' }
+        hashtags:
+          type: array
+          items: { type: string }
+        tone: { type: string }
+
+    SocialPostRef:
+      type: object
+      required: [external_id]
+      properties:
+        external_id: { type: string, description: "Стабильный id поста в соцсети." }
+        text: { type: string }
+        date: { type: string, format: date-time }
+        views: { type: integer }
+        likes: { type: integer }
+        comments: { type: integer }
+        shares: { type: integer }
+        media_type: { type: string }
+
+    CrossChannelSummary:
+      type: object
+      properties:
+        total_reach: { type: integer }
+        strongest_channel: { $ref: '#/components/schemas/ChannelId' }
+        consistency: { type: string, examples: ["high", "medium", "low"] }
+
+    ParseMeta:
+      type: object
+      properties:
+        source: { type: string, enum: [telethon, api, public, mock] }
+        mode: { type: string, enum: [real, mock] }
+        fetched_at: { type: string, format: date-time }
+        limit: { type: integer }
+
+    # ─────────────────────────── evidence / control ───────────────────────────
+
+    EvidenceBlock:
+      type: object
+      properties:
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/EvidenceSource' }
+        field_confidence:
+          type: object
+          additionalProperties: { type: number, minimum: 0, maximum: 1 }
+          description: 'Напр. {"business.name": 0.9, "market.competitors": 0.4}.'
+        raw:
+          $ref: '#/components/schemas/RawEvidence'
+
+    EvidenceSource:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [website, document, social, llm] }
+        ref: { type: string, description: "URL / имя файла / канал." }
+        fetched_at: { type: string, format: date-time }
+        ok: { type: boolean }
+
+    RawEvidence:
+      type: object
+      additionalProperties: true
+      description: |
+        Сырьё для RAG/провенанса: `website` (meta, headings, paragraphs, extracted_links),
+        `documents[]` ({name, mime, raw_text}), `socials` (сырые посты). Строкой в payload
+        не отправляется (риск SecurityGuard) — индексируется через RAG ingest.
+
+    Warning:
+      type: object
+      properties:
+        code: { type: string, examples: ["SITE_UNREACHABLE"] }
+        message: { type: string }
+        field: { type: string }
+
+    NeedsInput:
+      type: object
+      required: [field, question]
+      description: Машинно-читаемые вопросы для онбординг-UI.
+      properties:
+        field: { type: string, examples: ["target_audience"] }
+        question: { type: string }
+        reason: { type: string }
+        options:
+          type: array
+          items: { type: string }
+
+    # ─────────────────────────── enums ───────────────────────────
+
+    TaskType:
+      type: string
+      description: Стадии онбординга + существующие задачи контура.
+      enum:
+        - business_onboard
+        - onboarding
+        - quick_scan
+        - analyze_documents
+        - onboard_user
+        - parse_socials
+        - parse_telegram
+        - parse_vk
+        - analyze_competitors
+        - brand_analytics
+        - generate_post
+        - quick_vision
+        - plan_content
+
+    ChannelId:
+      type: string
+      enum: [website, telegram, vk, ok, instagram, max, zen, rutube, avito, whatsapp]
+
+    IndustryCode:
+      type: string
+      description: Дословно совпадает с enum `Industry` business-service.
+      enum: [CAFE_RESTAURANT, BEAUTY_SALON, RETAIL, SERVICES, EDUCATION, FITNESS, MEDICINE, OTHER]
+
+    ToneOfVoiceCode:
+      type: string
+      description: Дословно совпадает с enum `ToneOfVoice` business-service.
+      enum: [FRIENDLY, PROFESSIONAL, INFORMAL, CREATIVE]
+
+    Sentiment:
+      type: string
+      enum: [positive, neutral, negative, mixed]
+
+    Priority:
+      type: string
+      enum: [low, medium, high]
+
+  examples:
+    BusinessOnboardResult:
+      summary: Стадия 1 — сайт + документы (без соцсетей и аналитики)
+      value:
+        status: success
+        task_type: business_onboard
+        session_id: an_7f3c1e2a
+        data:
+          schema_version: "1.0"
+          status: partial
+          stage: business_onboard
+          partial: true
+          stages:
+            website: done
+            documents: done
+            socials: { telegram: pending, vk: pending, instagram: pending }
+          business:
+            name: Example Coffee
+            industry_code: CAFE_RESTAURANT
+            industry_raw: кофейня
+            description: Specialty-кофейня с собственной обжаркой
+            city: Казань
+            social_links: { website: "https://example-coffee.ru" }
+            business_hours: { open_time: "08:00", close_time: "21:00", off_days: [] }
+          brand:
+            positioning: Свежая обжарка и авторские напитки в центре города
+            usp: ["собственная обжарка", "локальные зёрна"]
+            tone_of_voice_code: FRIENDLY
+            tone_of_voice_raw: тёплый, дружелюбный
+          offer:
+            items:
+              - { name: "Фильтр-кофе", price: 250, currency: RUB, unit: "шт" }
+          swot:
+            strengths: [{ text: "своя обжарка", impact: high, confidence: 0.8 }]
+            weaknesses: []
+            opportunities: []
+            threats: []
+          evidence:
+            sources:
+              - { type: website, ref: "https://example-coffee.ru", ok: true }
+              - { type: document, ref: "menu.pdf", ok: true }
+            field_confidence: { "business.name": 0.9, "brand.positioning": 0.6 }
+          needs_input:
+            - { field: target_audience, question: "Опишите вашу аудиторию", reason: "не найдено на сайте" }
+
+    ParseSocialsResult:
+      summary: Стадия 2 — парс соцсетей
+      value:
+        status: success
+        task_type: parse_socials
+        session_id: an_7f3c1e2a
+        data:
+          schema_version: "1.0"
+          status: partial
+          stage: parse_socials
+          partial: true
+          stages:
+            socials: { telegram: done, vk: done, instagram: failed }
+          socials:
+            channels:
+              - channel: telegram
+                handle: "@example_coffee"
+                verified: true
+                profile: { followers: 1200, posts_count: 340, bio: "Кофе и обжарка" }
+                metrics: { avg_views: 800, avg_likes: 40, engagement_rate: 4.1, posting_frequency: "5/нед", best_posting_time: "19:00" }
+                content:
+                  top_topics: ["обжарка", "новинки меню"]
+                  formats_mix: { photo: 0.7, text: 0.3 }
+                  top_posts:
+                    - { external_id: "tg_1024", text: "Новый сорт…", views: 1500, likes: 60 }
+                sentiment: positive
+                objections: ["дорого"]
+            summary: { total_reach: 2300, strongest_channel: telegram, consistency: medium }
+            parse_meta: { source: telethon, mode: real, fetched_at: "2026-10-17T10:00:00Z", limit: 100 }
+          warnings:
+            - { code: SOCIAL_PARSE_FAILED, message: "instagram недоступен", field: "socials.channels[instagram]" }
+
+    BrandAnalyticsResult:
+      summary: Стадия 4 — производная аналитика
+      value:
+        status: success
+        task_type: brand_analytics
+        session_id: an_7f3c1e2a
+        data:
+          schema_version: "1.0"
+          status: success
+          stage: brand_analytics
+          partial: false
+          analytics:
+            scores: { positioning_strength: 62, digital_presence: 41, content_maturity: 30, competitive_position: 55 }
+            positioning_map:
+              axes: { x: цена, y: качество }
+              points: [{ entity: "мы", x: 5, y: 8 }, { entity: "competitor.ru", x: 7, y: 6 }]
+            recommendations:
+              - { area: контент, priority: high, action: "Публиковать 3 поста в неделю", expected_impact: "+ER" }
+            content_pillars: [{ name: обжарка, share_pct: 40 }]
+            channel_plan: [{ channel: telegram, priority: high, cadence: "3/нед" }]
+            kpi_targets: { horizon_days: 90, engagement_rate: 4.5, posts_per_week: 3 }
+            risks: [{ type: конкуренция, severity: med, description: "Рост сетевых кофеен" }]
+            quick_wins: ["Заполнить шапку профиля Telegram"]
+
+    InsufficientDataResult:
+      summary: Недостаточно данных — ограниченный вид без аналитики/SWOT
+      description: |
+        Пользователь не дал источника, либо после парса данных всё равно мало. Бэкенд/фронт
+        показывают частичный профиль и просят дозаполнить; автогенерация и аналитика выключены.
+      value:
+        status: partial
+        task_type: business_onboard
+        session_id: an_7f3c1e2a
+        data:
+          schema_version: "1.0"
+          revision: 1
+          status: partial
+          mode: limited
+          stage: business_onboard
+          partial: false
+          readiness:
+            sufficient_for_analysis: false
+            sufficient_for_autogeneration: false
+            score: 20
+            missing: [website, socials, description]
+          business: { name: "Мой бизнес" }
+          warnings:
+            - { code: NOT_ENOUGH_DATA, message: "Недостаточно данных для аналитики" }
+          needs_input:
+            - { field: website, question: "Добавьте ссылку на сайт или соцсеть", reason: "нет источника" }
+            - { field: description, question: "Опишите деятельность в двух предложениях" }
+
+x-business-process-mapping:
+  description: Соответствие шагов бизнес-процесса (drawio) контракту.
+  steps:
+    - business_step: "Ввод названия проекта; окно выбора файла/ссылки; «Создать проект»"
+      contract: "payload {company_name, urls, socials, documents, raw_notes}"
+    - business_step: "Пользователь отправил что-либо?"
+      contract: "Если пусто — блок выполняется на бэкенде/фронте (валидация AnalysisRequest: ANALYSIS_EMPTY_INPUT)"
+    - business_step: "Парсинг данных из источников"
+      contract: "stages.website/documents/socials; evidence.sources; evidence.raw"
+    - business_step: "AI-обработка, поиск конкурентов и сравнение"
+      contract: "market.competitors[]; market.comparison; market.gaps"
+    - business_step: "SWOT + аналитика за последний ~месяц"
+      contract: "swot{}; analytics.scores/window{from,to,days}/recommendations; socials.channels[].metrics{window_days}"
+    - business_step: "Формирование ответа бэкенду; постепенная отдача с версионированием"
+      contract: "BusinessDossier{schema_version, revision, partial, stages}; merge по session_id+revision"
+    - business_step: "Постепенная догрузка на фронт через веб-сокет"
+      contract: "Контур→бэкенд: ревизии (partial). Бэкенд сохраняет и отдаёт фронту (WS/polling). Прямого стриминга AI→фронт нет; см. x-progressive-delivery"
+    - business_step: "Пользователь заполнил поля и перешёл в дашборд"
+      contract: "PATCH /projects/{id} (ProjectPatch/brandProfile)"
+    - business_step: "Хватает данных для аналитики и автогенерации?"
+      contract: "readiness{sufficient_for_analysis, sufficient_for_autogeneration, score, missing}"
+    - business_step: "Ознакомить с аналитикой и предложить контент-план"
+      contract: "analytics.*; analytics.content_plan{posts_count, cadence, items[]}"
+    - business_step: "Уведомить о количестве постов и тарифе; начать генерацию"
+      contract: "Вне контура: billing-service (квота/тариф) + POST /orchestration/generate/async"
+    - business_step: "Ограниченный вид без аналитики/SWOT"
+      contract: "mode=limited; readiness.missing; needs_input[]"
+    - business_step: "Уведомление о недостатке данных и повторная просьба"
+      contract: "warnings[] + needs_input[]"
+
+x-progressive-delivery:
+  description: |
+    «Постепенная догрузка» без прямого стриминга AI→фронт. Данные приходят в бэкенд
+    по мере готовности стадий, бэкенд их СОХРАНЯЕТ, а фронт обновляется уже от бэкенда.
+
+    Схема:
+      1) Контур → бэкенд: на каждую готовую стадию — /orchestrator/execute (sync) и/или
+         пуш /api/v1/ai/callback. Каждая отдача = тот же BusinessDossier с растущим
+         `revision` (partial=true, кроме финальной). Прямой стриминг контура на фронт НЕ нужен.
+      2) Бэкенд: применяет блоки только если `revision > lastApplied` для `session_id`,
+         мёржит по ключам дедупа, сохраняет досье (analysis/`Project.brandProfile`) —
+         status=COMPLETED только при `partial=false`.
+      3) Бэкенд → фронт: фронт получает обновления от бэкенда (WS-ретрансляция сохранённых
+         ревизий и/или polling GET /orchestration/analysis/{id}). Это вне scope контура.
+
+    Контур обязан: слать самодостаточные ревизии с монотонным `revision` и корректным
+    `partial`/`stages`; не обязан знать о фронте.
+  guarantees:
+    - ordering: revision
+    - idempotency: true
+    - final_signal: "partial=false и status=success"
+  contour_to_backend:
+    transport: [execute, callback]
+    unit: revision
+  backend_to_frontend:
+    transport: [websocket, polling]
+    source: "сохранённые ревизии на бэкенде"
+    direct_ai_streaming: false
+
+x-orchestration:
+  description: Схема многошагового онбординга (не обязательно в одном запросе).
+  steps:
+    - stage: business_onboard
+      when: есть url и/или documents
+      depends_on: []
+    - stage: parse_socials
+      when: пользователь привязал соцсети
+      depends_on: [business_onboard]
+    - stage: analyze_competitors
+      when: есть industry/geography из business_onboard
+      depends_on: [business_onboard]
+    - stage: brand_analytics
+      when: собраны business/brand/socials/market
+      depends_on: [business_onboard, parse_socials, analyze_competitors]
+  merge:
+    key: session_id
+    dedup: [ "market.competitors[].domain", "socials.channels[].handle", "socials.channels[].content.top_posts[].external_id" ]
+    idempotent: true
+    note: Бэкенд домешивает блоки; status=COMPLETED только при partial=false. Повторные пуши не затирают готовые блоки.
+
+x-backend-mapping:
+  business: Project(name, industry, city, region, country, street, house, description, targetAudience, socialLinks, businessHours) через ProjectPatch
+  brand/offer/audience/market/swot/analytics: Project.brandProfile (JSON)
+  socials: ChannelAnalysis/Post/PostStatistics + RAG channel_context:{projectId}
+  evidence.raw: RAG brand_profile:{projectId}
+  warnings/needs_input: AnalysisResponse / онбординг-UI
+  required_backend_changes:
+    - Расширить ProjectPatch/UpdateProjectRequest полями street/house/businessHours/phone/email
+    - Расширить форму brandProfile-JSON секциями analytics/audience/comparison
+    - Многостадийная домиксовка в BusinessAnalysisService вместо единственного complete()
+
+x-analytics-capabilities:
+  positioning_map: Карта конкурентов по осям (цена/качество/…)
+  competitor_comparison: Матрица «мы vs конкуренты» по осям + gaps
+  swot: Сильные/слабые стороны, возможности, угрозы
+  social_audit: Частота постинга, ER, охват, топ-темы, форматы, тон, лучшее время, sentiment, возражения
+  brand_scores: clarity/consistency/positioning/digital_presence/content_maturity
+  strategy: Контент-пилларсы, приоритет каналов, каденция, KPI-цели
+  price_offer_gaps: Сравнение цен/состава с конкурентами
+  risks_and_quick_wins: Риски и быстрые улучшения
+
+x-conformance-notes:
+  - "Поле `event_type` (v2.7.0) приводится к `task_type`; `result`↔`data` — алиасы."
+  - "v2.5.0 отдаёт результат плоско внутри `data`; целевой контракт — вложенные блоки выше."
+  - "Флаг `generate_image:false` стоковым контуром игнорируется (отношение к генерации постов, не к онбордингу)."
+  - "Изображения соцсетей/сайта — публичные URL (не относительные пути контура)."
