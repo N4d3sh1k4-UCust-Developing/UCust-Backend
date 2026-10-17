@@ -10,6 +10,7 @@ Microservices on Spring Boot 4 / Java 25:
 - **billing-service** (`:8106`) — billing/billing_quota management
 - **content-service** (`:8108`) — публичный контент сайта: FAQ, юридические документы (PDF в MinIO), футер (карточки с контактами), брендбук (логотип + BIMI-SVG). Публичный чтение `GET /api/v0/content/**`, запись `/api/v0/admin/content/**` (ROLE_ADMIN)
 - **generative-orchestration-service** (`:8107`) — generative AI orchestration (calls billing-service quota; external AI через Единый Шлюз Оркестратора `POST /api/v1/orchestrator/execute` + callback `POST /api/v1/ai/callback` с `X-Internal-Secret`)
+- **audit-log-service** (`:8109`) — журнал действий администрации (матрица ролей, стр. 28–32). Только ingestion через RabbitMQ: слушает `audit-log-queue` (routing key `audit.log` на `user-exchange`), пишет `AuditEvent` в БД `audit_log_service_db` (идемпотентно по `event_id`). Чтение — `GET /api/v0/admin/audit/{admins|moderators|support|users}` (категория актора): `admins` — только GEN_ADMIN, остальные — GEN_ADMIN/ADMIN. Продюсеры — `AuditPublisher` (бин в Rabbit-конфиге каждого сервиса) в точках ключевых админ-действий.
 - **configuration-service** (no port) — Spring Cloud Config (currently disabled)
 - **Prod-Nginx (rinhbaby, НЕ в git, правится вручную)**: внешний stream nginx (конфиг `/etc/nginx/conf/nginx.conf` + `/etc/nginx/conf/streams/xray-module.conf`) — SNI-роутер по `ssl_preread` на :443, без TLS-терминации, проксирует TCP на внутренние nginx (:8444–8452, конфиги в `/etc/nginx/conf/sites-enabled/`), которые терминациируют TLS и проксируют на docker-контейнеры. **PROXY protocol полная цепочка (2026-09-12)**: внешний сервер с белым IP (5.42.124.217, WireGuard peer, WG `10.0.0.0/24`) шлёт PROXY protocol на rinhbaby :443 (`listen ... proxy_protocol`); stream-контекст nginx на rinhbaby теперь умеет realip: `set_real_ip_from 127.0.0.1; set_real_ip_from 10.0.0.0/24;` (+ было пересобрано `nginx` из исходников в `/opt/build/nginx-1.29.5` с добавлением `--with-stream_realip_module`; старый бинарь сохранён `nginx.bak-20260912-171638`; сборка нужна была потому что `real_ip_header` **не** существует в stream-контексте, модуль stream_realip автоматически берёт реальный IP из PP-заголовка). Далее `proxy_protocol on;` в stream-server + `proxy_protocol` в каждом внутреннем `listen` + `set_real_ip_from 127.0.0.1; real_ip_header proxy_protocol;` в http-контексте → реальный IP клиента доходит до внутренних nginx и уходит в `X-Real-IP`/`X-Forwarded-For`. Без этого на L4-хопе IP терялся (`10.0.0.1` = WG-адрес внешнего сервера). Эндпоинты `api.ucust` = внутренний nginx on :8446 → gateway :8100. Reload: `sudo systemctl reload nginx`. Бэкапы конфигов: `/etc/nginx/backup-*` и `/etc/nginx/sbin/nginx.bak-*`. SSH: `ssh n4d3sh1k4@rinhbaby`.
 - **ClientIpUtils (security-service)**: единый резолв реального IP запроса — `X-Forwarded-For` (первый в списке) → `X-Real-IP` → `getRemoteAddr()`. Используется в `AuthController` (login/refresh/yandex-mobile/link-social) и `OAuth2SuccessHandler` для claim `city` и логов сессий.
@@ -124,6 +125,19 @@ Microservices on Spring Boot 4 / Java 25:
 - **Инфра/CI:** `docker-compose.yml` (сервис + env `CONTENT_MINIO_*`), `docker-compose.local.yml` и `ops/docker-compose.yml` (minio-init: бакет/политика/юзер), `ops/postgres/init.sql`, `ops/scripts/ensure-databases.sh`, новый `ops/minio/policies/content-service-rw.json`; `.github/workflows/main.yml` — матрица + секреты `CONTENT_MINIO_ACCESS_KEY`/`CONTENT_MINIO_SECRET_KEY`/`CONTENT_MINIO_PUBLIC_BASE_URL`.
 - **Статус:** код написан, собирается. Git-репозиторий (`backend-content-service`) и его регистрация сабмодулем — за пользователем; до этого `content-service/` — обычная untracked-папка.
 
+### 14. audit-log-service — журнал действий администрации (2026-10-17)
+
+Новый сервис `audit-log-service` (`:8109`) реализует матрицу ролей стр. 28–32 — журнал действий. Запись **только через RabbitMQ** (нет admin-эндпоинта на запись), чтение — через gateway.
+
+- **Контракт события:** `common/.../audit/AuditEvent` (record: `eventId`, `actorId`, `actorCategory`, `action`, `targetType`, `targetId`, `details`, `ip`, `occurredAt`, `Serializable`). `AuditActorCategory` = USER/SUPPORT/MODERATOR/ADMIN; `AuditActorResolver.resolve(roles)` по приоритету (GEN_ADMIN/ADMIN→ADMIN, MODERATOR→MODERATOR, SUPPORT→SUPPORT, иначе USER; `ROLE_` префикс срезается). `AuditActions`/`AuditTargetTypes` — стаблильные строковые константы.
+- **Продюсеры:** `AuditPublisher` (`common`) — `record(action, targetType, targetId, details)` берёт актора/роли из `SecurityContextHolder` (заполняет `InternalUserFilter` из `X-User-Id`/`X-User-Roles` шлюза) и IP из `X-Forwarded-For`→`X-Real-IP`→`getRemoteAddr()`; публикует в `user-exchange` с routing key `audit.log`; **best-effort** (сбой гасится и логируется, не ломает операцию). Регистрируется бином `@Bean AuditPublisher auditPublisher(RabbitTemplate)` в Rabbit-конфиге каждого сервиса. Для новых сущностей с `IDENTITY` id используется null-guard (`entity.getId() == null ? null : ...`), иначе NPE в юнит-тестах с моком `save`.
+- **Точки вызова:** security-service (`AdminUserService`: USER_BLOCKED/UNBLOCKED/ROLES_UPDATED/DELETED/SESSIONS_REVOKED/USER_PASSWORD_RESET_LINK_SENT/USER_PASSWORD_CHANGED; `BanService`: BAN_CREATED/BAN_LIFTED; `AppealService.decide`: BAN_LIFTED/BAN_EXTENDED); user-service (`WarningService`: WARNING_ISSUED/REVOKED; `ComplaintService`: COMPLAINT_TAKEN/ESCALATED/RESOLVED; `AdminUserService.setVisibility`: PROFILE_HIDDEN/UNHIDDEN); business-service (`ProjectService.setVisibility`: PROJECT_HIDDEN/UNHIDDEN); generative-orchestration (`GenerationService.setPostVisibilityAsAdmin`: POST_HIDDEN/UNHIDDEN); billing-service (`TariffService`: TARIFF_CREATED/UPDATED/DELETED; `RefundService`: REFUND_ISSUED).
+- **Хранение/чтение:** `AuditLogEntry` (`audit_log_entry`, уникальный `event_id`, индексы `actor_category`/`occurred_at`), `AuditLogService.record` идемпотентен по `eventId`; `list(category, action, actorId, from, to, page, limit)` — JPA `Specification`, сортировка `occurredAt DESC`, limit ≤ 100. `AdminAuditLogController` `/admin/audit`: `GET /admins` — `hasRole('GEN_ADMIN')`, `/moderators|/support|/users` — `hasAnyRole('GEN_ADMIN','ADMIN')`.
+- **Gateway:** роут `audit-log-service-admin` (`/api/v0/admin/audit/**`, authFilter, `stripPrefix(2)`), swagger `swagger-docs-audit-log`; uri `audit-log-service.uri` (dev `localhost:8109`, prod `http://audit-log-service:8109`).
+- **Инфра:** `docker-compose.yml` (сервис, `SPRING_PROFILES_ACTIVE=prod`, `DB_PASSWORD`), `ops/postgres/init.sql` + `ops/scripts/ensure-databases.sh` (БД `audit_log_service_db`), `.github/workflows/main.yml` (матрица). Топология очереди обьявляется сервисом (`RabbitConfig`: `audit-log-queue` + DLQ `audit-log-queue.dlq` через `user-exchange.dlx`), `ops/rabbitmq/definitions.json` не меняется.
+- **Не затронуто:** content-service не продюсирует (нет amqp-зависимости) — журнал по контенту не пишется (известный пробел). RAG-контур к журналу не подключён.
+- **Тесты:** `audit-log-service` 11 (`AdminAuditLogControllerTest` 4, `AuditLogServiceTest` 6, `AuditEventListenerTest` 1); затронутые сервисы — security-service, user-service, business-service, generative-orchestration-service, billing-service: все зелёные (в security/user падают только экологические `contextLoads()`? нет — их тесты проходят, кроме `*ApplicationTests` при отсутствии PostgreSQL). Запуск: `.\gradlew :audit-log-service:test :security-service:test :user-service:test :business-service:test :generative-orchestration-service:test :billing-service:test --no-daemon --console=plain`.
+
 ## Local Development
 
 ```bash
@@ -151,6 +165,7 @@ docker compose -f docker-compose.local.yml up -d
 | Billing Service | — | 8106 |
 | Generative Orchestration | — | 8107 |
 | Content Service | — | 8108 |
+| Audit Log Service | — | 8109 |
 
 ## RabbitMQ Topology
 
@@ -165,6 +180,7 @@ Exchange: user-exchange (topic)
   → user-profile-phone-backfill-queue: user.phone.backfill (security-service при входе существующего юзера через OAuth-провайдера публикует телефон из провайдера; user-service заполняет `user_profile.phone` только если он пуст)
   → project-generation-queue: project.created (generative-orchestration: async-генерация постов при создании проекта, см. ProjectEventHandler)
   → project-deletion-queue: project.deleted (generative-orchestration: каскадное удаление проекта — ProjectDeletedEventHandler → ProjectDeletionService: посты/задачи генерации/анализы БД + медиа MinIO `media/{projectId}/...`)
+  → audit-log-queue: audit.log (audit-log-service: запись события журнала действий; слушатель читает `AuditEvent` из `common.audit`)
 ```
 
 **Конвертер сообщений:** издатели обязаны слать JSON — `RabbitTemplate` с `JacksonJsonMessageConverter` (контент-тип `application/json`). Примечание 2026-09-10: business-service публиковал `project.created` дефолтным `SimpleMessageConverter` (Java-сериализация, `application/x-java-serialized-object`, body `[serialized object]`) → слушатель `project-generation-queue` падал с `Could not convert ... [serialized object]` / `No listener method found for class [B` и после ретраев уводил сообщение в DLQ. Фикс: добавлен `business-service/.../config/RabbitConfig.java` (JacksonJsonMessageConverter c `trustedPackages("*")` + RabbitTemplate, по образцу security-service).
@@ -178,7 +194,7 @@ Exchange: user-exchange (topic)
 
 ## CI/CD Workflows
 
-1. **ucust-dev** (`.github/workflows/main.yml`): push → build+push 8 images → SSH deploy to `~/reshala-project/`
+1. **ucust-dev** (`.github/workflows/main.yml`): push → build+push 9 images → SSH deploy to `~/reshala-project/`
 2. **ucust-ops** (`ucust-ops/.github/workflows/deploy.yml`): push infra configs → SCP → SSH restart
 
 ## Needed Secrets (GitHub)

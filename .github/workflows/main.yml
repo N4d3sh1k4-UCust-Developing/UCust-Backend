@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [api-gateway, security-service, user-service, business-service, notification-service, billing-service, generative-orchestration-service, content-service]
+        service: [api-gateway, security-service, user-service, business-service, notification-service, billing-service, generative-orchestration-service, content-service, audit-log-service]
 
     permissions:
       contents: read

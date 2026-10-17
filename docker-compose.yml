@@ -114,6 +114,22 @@ services:
         limits:
           memory: 384M
 
+  audit-log-service:
+    image: ghcr.io/n4d3sh1k4-ucust-developing/audit-log-service:latest
+    container_name: audit-log-service-ucust
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JAVA_OPTS=-Xmx384m -Xms192m
+      - DB_PASSWORD=${DB_PASSWORD}
+    networks:
+      - ucust-net
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
   notification-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/notification-service:latest
     container_name: notification-service-ucust
