@@ -107,9 +107,11 @@
 скана, иначе правило роли не проверялось бы.
 
 ### Смежное
-- `api-endpoints.json` / `api-endpoints-public.json` в корне репо устарели: нет
-  `POST /orchestration/posts/{id}/regenerate` и `/regenerate/image`; `/admin/bans` и `/admin/projects`
-  ошибочно указаны «напрямую в сервис» — через gateway они роутятся.
+- `api-endpoints-public.json` в корне репо устарел: нет
+  `POST /orchestration/posts/{id}/regenerate` и `/regenerate/image`. Из него убраны все админские
+  эндпоинты и админские gateway-маршруты (`adminUi`, `swaggerDocs`); полная версия
+  `api-endpoints.json` (вкл. internal и админские маршруты) больше не в git — добавлена в
+  `.gitignore` и остаётся только локально.
 - `ucust-admin-spa` не проверяет роль на клиенте (403 приходит только с бэкенда) и не содержит ни
   одной бизнес-страницы — только Login + iframes Dozzle/MinIO/RabbitMQ/Swagger/PgAdmin.
 - `GET /api/v1/ai/callback` (GOS) защищён только `X-Internal-Secret` (`MessageDigest.isEqual`),

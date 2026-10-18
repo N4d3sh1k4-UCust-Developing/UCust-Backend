@@ -39,7 +39,7 @@
         { "status": 400, "code": "VALIDATION_ERROR", "when": "нарушение @Valid на теле запроса; message = сообщение первого field-error" },
         { "status": 400, "code": "MISSING_FILE", "when": "обязательная multipart-часть запроса отсутствует (MissingServletRequestPartException)" },
         { "status": 401, "code": "AUTH_ERROR", "when": "BadCredentialsException — неверный email или пароль" },
-        { "status": 403, "code": "ACCESS_DENIED", "when": "AccessDeniedException — недостаточно прав, в т.ч. /admin/** без ROLE_ADMIN" },
+        { "status": 403, "code": "ACCESS_DENIED", "when": "AccessDeniedException — недостаточно прав для операции" },
         { "status": 403, "code": "EMAIL_NOT_VERIFIED", "when": "DisabledException — аккаунт не активирован или отключён" },
         { "status": 500, "code": "TOKEN_GENERATION_FAILED", "when": "TokenCreationException (security-service) — не удалось создать токен" },
         { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "любое необработанное исключение; message = \\\"Server error \\\" + ex.getMessage()" }
@@ -47,7 +47,7 @@
       "gatewayRejections": {
         "note": "Эти ответы api-gateway отдаёт ДО сервиса, поэтому тела у них НЕТ — никакой ApiResponse. В поле responses они помечены code: null, body: \"empty\".",
         "401": "нет заголовка Authorization: Bearer либо токен невалиден/просрочен (AuthenticationGatewayFilterFactory)",
-        "403": "админ-маршрут с валидным токеном без ROLE_ADMIN (AdminAuthenticationGatewayFilterFactory). Тот же 403 без тела даёт SecurityFilterChain сервиса, если gateway-маршрут публичный и не передал X-User-Id — например POST/PUT/DELETE /api/v0/tariffs.",
+        "403": "валидный токен без требуемой роли. Тот же 403 без тела даёт SecurityFilterChain сервиса, если gateway-маршрут публичный и не передал X-User-Id — например POST/PUT/DELETE /api/v0/tariffs.",
         "directCall401": "при ПРЯМОМ вызове сервиса в обход gateway SecurityConfig отдаёт сырой { \"error\": \"Unauthorized\", \"message\": ... } — тоже без поля code (в responses помечено code: \"Unauthorized\", body: \"raw\")"
       },
       "rawBodyResponses": "БЕЗ обёртки ApiResponse: все /internal/** (raw-body S2S-контракт, исключены в GlobalResponseHandler — напр. /internal/quota/check для QuotaClient), любые String-возвраты (/api/v0/status/hello, /users/check-me, /api/v0/projects/{id}/logo), все 204 No Content, а также прямые 401/403 от SecurityFilterChain."
@@ -64,21 +64,6 @@
         "auth": "public (без JWT)",
         "note": "Auto-Push от Единого Шлюза Оркестратора; проверка X-Internal-Secret в AiCallbackController",
         "target": "generative-orchestration-service"
-      },
-      "adminUi": {
-        "note": "Служебные админ-роуты gateway (вне /api/v0): RabbitMQ UI /admin/rabbit/**, MinIO Console /admin/minio/**, PgAdmin /admin/pgadmin/**, Dozzle /admin/monitoring/**, Swagger UI /admin/swagger/**, OpenAPI JSON /admin/api-docs/{service}",
-        "auth": "adminAuthFilter (кроме /admin/pgadmin/** и /admin/swagger/** которые без adminAuthFilter), preserveHostHeader для RabbitMQ/MinIO"
-      },
-      "swaggerDocs": {
-        "auth": "adminAuthFilter",
-        "paths": {
-          "/admin/api-docs/security-service": "security-service /v3/api-docs",
-          "/admin/api-docs/user-service": "user-service /v3/api-docs",
-          "/admin/api-docs/business-service": "business-service /v3/api-docs",
-          "/admin/api-docs/billing-service": "billing-service /v3/api-docs",
-          "/admin/api-docs/generative-orchestration-service": "generative-orchestration-service /v3/api-docs",
-          "/admin/api-docs/content-service": "content-service /v3/api-docs"
-        }
       }
     },
     "services": [
@@ -423,132 +408,6 @@
                   ]
               }
             ]
-          },
-          "BanController": {
-            "tag": "Баны",
-            "basePath": "/admin/bans",
-            "gatewayPattern": "/api/v0/admin/bans, /api/v0/admin/bans/**",
-            "note": "Проксируется через gateway: /api/v0/admin/bans (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе",
-            "endpoints": [
-              {
-                "method": "POST",
-                "path": "/admin/bans",
-                "summary": "Забанить пользователя (админ)",
-                "auth": "Bearer (напрямую в сервис)",
-                "requestBody": {
-                  "userId": { "type": "UUID", "required": true },
-                  "reason": { "type": "string", "required": true },
-                  "expiresAt": { "type": "ISO-8601 Instant", "required": false, "description": "null = бессрочный бан" }
-                },
-                "response": "201 Created BanResponse",
-                "responses": [
-                    { "status": 201, "description": "BanResponse (id, userId, email, type=MANUAL, reason, bannedBy, createdAt, expiresAt, active)" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid CreateBanRequest: userId отсутствует или reason пустой" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN: SecurityConfig /admin/** требует hasRole(\"ADMIN\")" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пользователя с таким userId нет" },
-                    { "status": 409, "code": "BAN_ALREADY_ACTIVE", "when": "у пользователя уже есть активный бан" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "битый JSON, ошибка БД или subject токена не является UUID" }
-                  ]
-              },
-              {
-                "method": "POST",
-                "path": "/admin/bans/{id}/unban",
-                "summary": "Разбанить (деактивировать бан)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "response": "200 OK",
-                "responses": [
-                    { "status": 200, "description": "Бан переведён в active=false. Тело пустое." },
-                    { "status": 400, "code": "BAN_ALREADY_INACTIVE", "when": "бан уже неактивен" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "бан с таким id не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/admin/bans",
-                "summary": "Все активные баны",
-                "auth": "Bearer",
-                "response": "BanResponse[]",
-                "responses": [
-                    { "status": 200, "description": "BanResponse[] — все активные баны" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД или маппинга" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/admin/bans/user/{userId}",
-                "summary": "Активный бан пользователя",
-                "auth": "Bearer",
-                "pathParams": { "userId": "UUID" },
-                "response": "200 BanResponse | 204 если нет",
-                "responses": [
-                    { "status": 200, "description": "BanResponse активного бана пользователя" },
-                    { "status": 204, "description": "Активного бана нет — пустое тело. Несуществующий пользователь тоже даёт 204, а не 404." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/admin/bans/user/{userId}/history",
-                "summary": "История банов пользователя",
-                "auth": "Bearer",
-                "pathParams": { "userId": "UUID" },
-                "response": "BanResponse[]",
-                "responses": [
-                    { "status": 200, "description": "BanResponse[] — история банов пользователя, включая неактивные. Несуществующий пользователь даёт пустой массив, а не 404." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/admin/bans/user/{userId}/check",
-"summary": "Проверить, забанен ли пользователь",
-                "auth": "Bearer",
-                "pathParams": { "userId": "UUID" },
-                "response": "boolean",
-                "responses": [
-                    { "status": 200, "description": "boolean — есть ли активный бан. Истёкший по expiresAt бан деактивируется и даёт false" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
-                  ]
-              }
-            ]
-          },
-          "AdminAccountController": {
-            "tag": "Админ: удаление аккаунта",
-            "basePath": "/admin/accounts",
-            "gatewayPattern": "/api/v0/admin/accounts, /api/v0/admin/accounts/**",
-            "note": "Отдельный префикс /admin/accounts, а не /admin/users: последний занят user-service (чтение профилей). Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе.",
-            "endpoints": [
-              {
-                "method": "DELETE",
-                "path": "/api/v0/admin/accounts/{userId}",
-                "summary": "Удалить пользователя (админ)",
-                "auth": "Bearer",
-                "pathParams": { "userId": "UUID" },
-                "response": "204 No Content",
-                "note": "Удаляет аккаунт, OAuth-идентичности, access/refresh-токены и баны. Событие user.deleted уходит в outbox только после коммита транзакции и каскадом чистит профиль+аватар (user-service), проекты (business-service), посты/задачи/анализы/медиа (generative-orchestration-service). RAG-документы контура остаются: у Шлюза v2.5.0 нет эндпоинта удаления из RAG-БД.",
-                "responses": [
-                    { "status": 204, "description": "Пользователь удалён. Ответ без тела." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "USER_NOT_FOUND", "when": "пользователя с таким id нет" },
-                    { "status": 409, "code": "CANNOT_DELETE_SELF", "when": "adminId == userId — нельзя удалить собственную учётную запись" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
-                  ]
-              }
-            ]
           }
         }
       },
@@ -610,47 +469,6 @@
                     { "status": 413, "code": "FILE_TOO_LARGE", "when": "файл больше 5 МБ (лимит контейнера 10 МБ, поэтому проверка достижима)" },
                     { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не image/* и сигнатура файла не PNG/JPEG/GIF/WEBP" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен (MinioService бросает голый RuntimeException), ошибка БД или файл больше 10 МБ (лимит servlet-контейнера)" }
-                  ]
-              }
-            ]
-          },
-          "AdminUserController": {
-            "tag": "Админ: пользователи",
-            "basePath": "/admin/users",
-            "gatewayPattern": "/api/v0/admin/users, /api/v0/admin/users/**",
-            "note": "Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе",
-            "endpoints": [
-              {
-                "method": "GET",
-                "path": "/api/v0/admin/users",
-                "summary": "Список пользователей (пагинированный)",
-                "auth": "Bearer",
-                "queryParams": {
-                  "page": { "type": "int", "default": "0" },
-                  "limit": { "type": "int", "default": "20", "constraints": "1..100" },
-                  "search": { "type": "string", "required": false, "description": "Поиск по email, имени или фамилии" }
-                },
-                "response": "AdminUsersPage { items: ProfileResponse[], page, limit, total }",
-                "responses": [
-                    { "status": 200, "description": "AdminUsersPage { items, page, limit, total }. Некорректные page/limit санируются, а не дают 400." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN: user-service требует hasRole(\"ADMIN\") для /admin/**" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД или поиска" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/api/v0/admin/users/{userId}",
-                "summary": "Профиль любого пользователя по ID",
-                "auth": "Bearer",
-                "pathParams": { "userId": "UUID" },
-                "response": "ProfileResponse",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<ProfileResponse> — профиль указанного пользователя" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "USER_NOT_FOUND", "when": "профиля с таким userId нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
                   ]
               }
             ]
@@ -787,64 +605,6 @@
                   ]
               }
             ]
-          },
-          "AdminProjectController": {
-            "tag": "Админ: проекты",
-            "basePath": "/admin/projects",
-            "gatewayPattern": "/api/v0/admin/projects, /api/v0/admin/projects/**",
-            "note": "Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе. Поиск проекта идёт по findById без проверки ownerId, поэтому админ работает с проектами любых пользователей.",
-            "endpoints": [
-              {
-                "method": "GET",
-                "path": "/api/v0/admin/projects/{id}",
-                "summary": "Проект любого пользователя по ID (админ)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "response": "ProjectResponse",
-                "note": "В отличие от GET /api/v0/projects/{id} проверка владельца не выполняется.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<ProjectResponse> проекта независимо от владельца" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PATCH",
-                "path": "/api/v0/admin/projects/{id}",
-                "summary": "Обновить проект любого пользователя (админ)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "requestBody": { "$ref": "тело UpdateProjectRequest — то же, что у PATCH /api/v0/projects/{id}" },
-                "response": "ProjectResponse",
-                "note": "Частичное обновление: null-поля не трогаются. Набор полей (socialLinks, businessHours, brandProfile) идентичен владельческому PATCH.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<ProjectResponse> с применёнными изменениями" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid UpdateProjectRequest нарушены ограничения (name 2..100, city ≤50, region ≤100, country ≤100, description ≤2000, targetAudience ≤500, brandProfile ≤100000)" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "DELETE",
-                "path": "/api/v0/admin/projects/{id}",
-                "summary": "Удалить проект любого пользователя (админ)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "response": "204 No Content",
-                "note": "В отличие от DELETE /api/v0/projects/{id} (там 200 OK) админский вариант отдаёт 204. Каскад тот же: логотип из MinIO (best-effort) + событие project.deleted с НАСТОЯЩИМ ownerId, поэтому generative-orchestration сносит посты/задачи/медиа именно его проекта.",
-                "responses": [
-                    { "status": 204, "description": "Проект удалён независимо от владельца, каскад запущен. Ответ без тела." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "проект не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при удалении" }
-                  ]
-              }
-            ]
           }
         }
       },
@@ -930,43 +690,6 @@
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким tariffId нет" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "subject токена не является UUID или ошибка БД" }
-                  ]
-              }
-            ]
-          },
-          "AdminSubscriptionController": {
-            "tag": "Админ: подписки",
-            "basePath": "/admin/billing/subscriptions",
-            "gatewayPattern": "/api/v0/admin/billing/**",
-            "endpoints": [
-              {
-                "method": "PUT",
-                "path": "/api/v0/admin/billing/subscriptions/{userId}/tariff/{tariffId}",
-                "summary": "Выдать пользователю тариф (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "userId": "UUID", "tariffId": "UUID" },
-                "response": "SubscriptionResponse",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<SubscriptionResponse> — подписка выдана, счётчики обнулены. Отсутствие пользователя ошибкой не является." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN: /admin/** требует hasRole(\"ADMIN\") в billing-service" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким tariffId нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId или tariffId не разбираются как UUID, либо ошибка БД" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/api/v0/admin/billing/subscriptions/{userId}",
-                "summary": "Подписка пользователя (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "userId": "UUID" },
-                "response": "SubscriptionResponse | 404",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<SubscriptionResponse> — подписка пользователя" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": null, "body": "empty", "when": "у пользователя нет подписки: ResponseEntity.notFound() — пустое тело, error.code отсутствует" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "userId не разбирается как UUID или ошибка БД" }
                   ]
               }
             ]
@@ -1256,79 +979,6 @@
 { "status": 200, "description": "ApiResponse<PostResponse[]> — посты проекта, сортировка по createdAt DESC. Нет постов — пустой массив, а не 404." },
                     { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "projectId не разбирается как UUID (MethodArgumentTypeMismatchException) или ошибка БД" }
-                  ]
-              }
-            ]
-          },
-          "AdminPostController": {
-            "tag": "Админ: посты",
-            "basePath": "/admin/orchestration",
-            "gatewayPattern": "/api/v0/admin/orchestration, /api/v0/admin/orchestration/**",
-            "note": "Путь повторяет /orchestration, чтобы отличаться только префиксом /admin. Проксируется через gateway (authFilter, JWT обязателен, stripPrefix(2)); требует ROLE_ADMIN на сервисе. Отличия от GenerationController: нет проверки владельца и DELETE разрешён для PUBLISHED — это модераторский инструмент.",
-            "endpoints": [
-              {
-                "method": "GET",
-                "path": "/api/v0/admin/orchestration/posts/{id}",
-                "summary": "Пост любого пользователя по ID (админ)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "response": "PostResponse",
-                "note": "В отличие от GET /api/v0/orchestration/posts/{id} проверка владельца не выполняется. Метрики отдаются так же, как у владельца.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<PostResponse> поста независимо от владельца" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PATCH",
-                "path": "/api/v0/admin/orchestration/posts/{id}",
-                "summary": "Обновить пост любого пользователя (админ)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "requestBody": { "$ref": "тело UpdatePostRequest — то же, что у PATCH /api/v0/orchestration/posts/{id}" },
-                "response": "PostResponse",
-                "note": "Частичное обновление теми же правилами, что у владельца: null-поля не трогаются, scheduledAt должен быть в будущем. Статус поста не меняется.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<PostResponse> с применёнными изменениями" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "нарушены ограничения UpdatePostRequest либо scheduledAt в прошлом" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "DELETE",
-                "path": "/api/v0/admin/orchestration/posts/{id}",
-                "summary": "Удалить пост любого пользователя (админ)",
-                "auth": "Bearer",
-                "pathParams": { "id": "UUID" },
-                "response": "204 No Content",
-                "note": "В отличие от DELETE /api/v0/orchestration/posts/{id} (409 POST_ALREADY_PUBLISHED для PUBLISHED) админский вариант снимает и уже опубликованный пост. Метрики (post_statistics) и файл поста удаляются вместе с ним; чистка MinIO best-effort.",
-                "responses": [
-                    { "status": 204, "description": "Пост удалён независимо от владельца и статуса, метрики и медиа снесены. Ответ без тела." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "пост не найден" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД при удалении" }
-                  ]
-              },
-              {
-                "method": "GET",
-                "path": "/api/v0/admin/orchestration/projects/{projectId}/posts",
-                "summary": "Посты любого проекта (админ)",
-                "auth": "Bearer",
-                "pathParams": { "projectId": "UUID" },
-                "response": "PostResponse[]",
-                "note": "Сортировка по createdAt DESC, метрики подтягиваются одним батчем. Нет постов — пустой массив, а не 404.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<PostResponse[]> — все посты проекта независимо от владельца" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "projectId не разбирается как UUID или ошибка БД" }
                   ]
               }
             ]
@@ -1630,7 +1280,7 @@
             "tag": "FAQ",
             "basePath": "/content/faq",
             "gatewayPattern": "/api/v0/content/faq (public)",
-            "note": "Публичное чтение /api/v0/content/faq (permitAll). Запись — /api/v0/admin/content/faq/** (JWT + ROLE_ADMIN).",
+            "note": "Публичное чтение /api/v0/content/faq (permitAll).",
             "endpoints": [
               {
                 "method": "GET",
@@ -1698,221 +1348,6 @@
                 "responses": [
                     { "status": 200, "description": "ApiResponse<BrandAssets> — logoUrl (PNG/SVG), bimiSvgUrl может быть null" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
-                  ]
-              }
-            ]
-          },
-          "ContentAdminController": {
-            "tag": "Админ: контент сайта",
-            "basePath": "/admin/content",
-            "gatewayPattern": "/api/v0/admin/content/**, JWT + ROLE_ADMIN",
-            "note": "Запись статического контента (FAQ, документы, футер, бренд). Все эндпоинты требуют ROLE_ADMIN.",
-            "endpoints": [
-              {
-                "method": "POST",
-                "path": "/api/v0/admin/content/faq",
-                "summary": "Создать вопрос FAQ (админ)",
-                "auth": "Bearer (admin)",
-                "requestBody": {
-                  "question": { "type": "string", "required": true, "constraints": "1..500" },
-                  "answer": { "type": "string", "required": true, "constraints": "1..5000" },
-                  "order": { "type": "int", "required": false, "default": 0 },
-                  "enabled": { "type": "boolean", "required": false, "default": true }
-                },
-                "response": "201 Created FaqItem",
-                "responses": [
-                    { "status": 201, "description": "ApiResponse<FaqItem> — созданный вопрос" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid FaqRequest: пустой question или answer" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PATCH",
-                "path": "/api/v0/admin/content/faq/{id}",
-                "summary": "Обновить вопрос FAQ (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "id": "UUID" },
-                "requestBody": {
-                  "question": { "type": "string", "required": false, "constraints": "1..500" },
-                  "answer": { "type": "string", "required": false, "constraints": "1..5000" },
-                  "order": { "type": "int", "required": false },
-                  "enabled": { "type": "boolean", "required": false }
-                },
-                "response": "FaqItem",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<FaqItem> — обновлённый вопрос (частичное обновление)" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "переданное question/answer нарушает ограничения" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "вопроса с таким id нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "DELETE",
-                "path": "/api/v0/admin/content/faq/{id}",
-                "summary": "Удалить вопрос FAQ (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "id": "UUID" },
-                "response": "204 No Content",
-                "responses": [
-                    { "status": 204, "description": "Вопрос удалён. Тело пустое." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "вопроса с таким id нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "POST",
-                "path": "/api/v0/admin/content/documents",
-                "summary": "Загрузить правовой документ (админ, multipart)",
-                "auth": "Bearer (admin)",
-                "requestBody": {
-                  "file": { "type": "file (PDF)", "required": true, "constraints": "application/pdf, до 10 МБ" },
-                  "title": { "type": "string", "required": true, "constraints": "1..200" },
-                  "order": { "type": "int", "required": false, "default": 0 }
-                },
-                "response": "201 Created LegalDocument",
-                "responses": [
-                    { "status": 201, "description": "ApiResponse<LegalDocument> — созданный документ; url = /s3/content-service/documents/{uuid}.pdf" },
-                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть file отсутствует" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "пустой title" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 413, "code": "FILE_TOO_LARGE", "when": "файл больше лимита (10 МБ)" },
-                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не application/pdf или сигнатура не PDF" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PATCH",
-                "path": "/api/v0/admin/content/documents/{id}",
-                "summary": "Обновить метаданные документа (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "id": "UUID" },
-                "requestBody": {
-                  "title": { "type": "string", "required": false, "constraints": "1..200" },
-                  "order": { "type": "int", "required": false }
-                },
-                "response": "LegalDocument",
-                "note": "Меняются только title/order; сам файл не заменяется — для новой версии загружается новый документ.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<LegalDocument> — обновлённые метаданные" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "пустой title" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "документа с таким id нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "DELETE",
-                "path": "/api/v0/admin/content/documents/{id}",
-                "summary": "Удалить правовой документ (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "id": "UUID" },
-                "response": "204 No Content",
-                "responses": [
-                    { "status": 204, "description": "Документ удалён (строка БД + объект в MinIO, best-effort). Тело пустое." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "документа с таким id нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "POST",
-                "path": "/api/v0/admin/content/footer",
-                "summary": "Создать карточку футера (админ)",
-                "auth": "Bearer (admin)",
-                "requestBody": {
-                  "title": { "type": "string", "required": true, "constraints": "1..200" },
-                  "order": { "type": "int", "required": false, "default": 0 },
-                  "items": { "type": "FooterItem[]", "required": true, "description": "Строки-контакты: { label, value, href?, icon? }" }
-                },
-                "response": "201 Created FooterCard",
-                "responses": [
-                    { "status": 201, "description": "ApiResponse<FooterCard> — созданная карточка с контактами" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid FooterCardRequest: пустой title или пустой список items" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PATCH",
-                "path": "/api/v0/admin/content/footer/{id}",
-                "summary": "Обновить карточку футера (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "id": "UUID" },
-                "requestBody": {
-                  "title": { "type": "string", "required": false, "constraints": "1..200" },
-                  "order": { "type": "int", "required": false },
-                  "items": { "type": "FooterItem[]", "required": false, "description": "Полная замена списка контактов карточки" }
-                },
-                "response": "FooterCard",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<FooterCard> — обновлённая карточка (items передан — полная замена)" },
-                    { "status": 400, "code": "VALIDATION_ERROR", "when": "переданный title/items нарушает ограничения" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "карточки с таким id нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "DELETE",
-                "path": "/api/v0/admin/content/footer/{id}",
-                "summary": "Удалить карточку футера (админ)",
-                "auth": "Bearer (admin)",
-                "pathParams": { "id": "UUID" },
-                "response": "204 No Content",
-                "responses": [
-                    { "status": 204, "description": "Карточка удалена. Тело пустое." },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 404, "code": "NOT_FOUND", "when": "карточки с таким id нет" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "id не разбирается как UUID или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PUT",
-                "path": "/api/v0/admin/content/brand/logo",
-                "summary": "Загрузить логотип сайта (админ, multipart)",
-                "auth": "Bearer (admin)",
-                "requestBody": {
-                  "file": { "type": "file (PNG/SVG)", "required": true, "constraints": "image/png или image/svg+xml, до 5 МБ" }
-                },
-                "response": "BrandAssets",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<BrandAssets> — logoUrl обновлён" },
-                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть file отсутствует" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не PNG/SVG" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен или ошибка БД" }
-                  ]
-              },
-              {
-                "method": "PUT",
-                "path": "/api/v0/admin/content/brand/bimi",
-                "summary": "Загрузить SVG для BIMI (админ, multipart)",
-                "auth": "Bearer (admin)",
-                "requestBody": {
-                  "file": { "type": "file (SVG)", "required": true, "constraints": "image/svg+xml, SVG Tiny 1.2 Portable/Secure, квадрат 1:1" }
-                },
-                "response": "BrandAssets",
-                "note": "BIMI-требования: DMARC p=quarantine/reject, SVG с baseProfile=\"tiny-ps\", HTTPS-доступность. Yandex BIMI не поддерживает — только логотип в DNS default._bimi.",
-                "responses": [
-                    { "status": 200, "description": "ApiResponse<BrandAssets> — bimiSvgUrl обновлён" },
-                    { "status": 400, "code": "MISSING_FILE", "when": "multipart-часть file отсутствует" },
-                    { "status": 401, "code": null, "body": "empty", "when": "gateway: нет или невалидный Bearer — 401 без тела" },
-                    { "status": 403, "code": "ACCESS_DENIED", "when": "валидный JWT без ROLE_ADMIN" },
-                    { "status": 415, "code": "INVALID_FILE_TYPE", "when": "content-type не image/svg+xml" },
-                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "MinIO недоступен или ошибка БД" }
                   ]
               }
             ]

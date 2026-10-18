@@ -17,6 +17,10 @@ ops/
 # Спецификации API ведутся в отдельном репозитории
 UCust-API-Specifications/
 
+# Полная спецификация API (вкл. внутренние/internal и админские маршруты) — не в git.
+# В репозитории остаётся только публичная версия api-endpoints-public.json.
+/api-endpoints.json
+
 # Frontend админки (отдельный репозиторий)
 ucust-admin-spa/
 
