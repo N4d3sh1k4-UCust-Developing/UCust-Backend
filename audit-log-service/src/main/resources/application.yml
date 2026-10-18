@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: audit-log-service
+  cloud:
+    config:
+      enabled: false
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5440/audit_log_service_db
+    username: ${DB_USER:ETA_DBUser}
+    password: ${DB_PASSWORD:devpassword123}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5680
+    username: ${RABBITMQ_USER:service-user}
+    password: ${RABBITMQ_PASS:servicepassword}
+    virtual-host: universal-host
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 2s
+          multiplier: 2.0
+          max-interval: 10s
+
+server:
+  port: 8109
