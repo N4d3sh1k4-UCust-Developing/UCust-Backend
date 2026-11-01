@@ -6,6 +6,22 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# --- Память JVM -------------------------------------------------------------
+# ВАЖНО: Dockerfile'ы используют exec-форму ENTRYPOINT
+#   ENTRYPOINT ["java", "-Dspring.profiles.active=prod", "-jar", "app.jar"]
+# поэтому переменная JAVA_OPTS в командную строку не подставляется и JVM её не
+# видит. Рабочий вариант — JAVA_TOOL_OPTIONS: JVM читает её сама, без изменения
+# образа. Без неё heap считается эргономикой (25 % от memory-лимита контейнера).
+#
+# Правило: memory-лимит = Xmx + ~200 МБ на metaspace/code cache/стеки/direct.
+# Значения подобраны по фактическим пикам cgroup на rinhbaby (2026-11-02):
+#   light  Xmx128 — api-gateway, audit-log, notification
+#   medium Xmx160 — user, business, content, billing
+#   heavy  Xmx192 — security, generative-orchestration
+# Сумма лимитов 9 сервисов ≈ 3.3 ГБ (фактическое потребление ≈ 2.4 ГБ).
+# Свободный слот под 10-й сервис: medium + 384M.
+# ----------------------------------------------------------------------------
+
 networks:
   ucust-net:
     external: true
@@ -18,7 +34,7 @@ services:
       - "8100:8100"
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx256m -Xms128m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - PGADMIN_URI=http://pgadmin-ucust:80
       - RABBITMQ_ADMIN_URI=http://rabbitmq-ucust:15672
@@ -32,14 +48,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 288M
 
   security-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/security-service:latest
     container_name: security-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - YANDEX_CLIENT_ID=${YANDEX_CLIENT_ID}
@@ -56,14 +72,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 448M
 
   user-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/user-service:latest
     container_name: user-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
       - MINIO_ACCESS_KEY=${USER_MINIO_ACCESS_KEY:-admin}
@@ -75,14 +91,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 384M
 
   business-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/business-service:latest
     container_name: business-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
     networks:
@@ -92,14 +108,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 384M
 
   content-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/content-service:latest
     container_name: content-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx384m -Xms192m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
       - CONTENT_MINIO_ACCESS_KEY=${CONTENT_MINIO_ACCESS_KEY:-content-service-user}
@@ -119,7 +135,7 @@ services:
     container_name: audit-log-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx384m -Xms192m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
     networks:
       - ucust-net
@@ -128,14 +144,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 288M
 
   notification-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/notification-service:latest
     container_name: notification-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - SUPPORT_EMAIL=${SUPPORT_EMAIL}
       - FRONTEND_URL=${FRONTEND_URL}
       - MAIL_HOST=${MAIL_HOST:-sandbox.smtp.mailtrap.io}
@@ -152,7 +168,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 412M
+          memory: 288M
 
   billing-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/billing-service:latest
@@ -161,7 +177,7 @@ services:
       - "8106:8106"
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - QUOTA_FREE_UNLIMITED=${QUOTA_FREE_UNLIMITED:-false}
@@ -173,7 +189,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 384M
 
   generative-orchestration-service:
     image: ghcr.io/n4d3sh1k4-ucust-developing/generative-orchestration-service:latest
@@ -182,7 +198,7 @@ services:
       - "8107:8107"
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_OPTS=-Xmx512m -Xms256m
+      - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - AI_SERVICE_URI=${AI_SERVICE_URI}
@@ -201,7 +217,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 448M
 
   # Локальный VLESS-клиент (MagnumVPN): подписка MagnumVPN → TUN -> HTTP-прокси
   # внутри ucust-net. Нужен только для верификации соцсетей с rinhbaby (RU-сеть,
