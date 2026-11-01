@@ -25,3 +25,6 @@
 [submodule "content-service"]
 	path = content-service
 	url = https://github.com/N4d3sh1k4-UCust-Developing/content-service.git
+[submodule "audit-log-service"]
+	path = audit-log-service
+	url = https://github.com/N4d3sh1k4-UCust-Developing/audit-log-service.git
