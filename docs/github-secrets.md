@@ -32,7 +32,10 @@
 | `SERVER_SSH_KEY` | ssh/scp | приватный SSH-ключ (PEM/OpenSSH) |
 | `TS_OAUTH_CLIENT_ID` | `tailscale/github-action` | OAuth-клиент Tailscale, тег `tag:ci` |
 | `TS_OAUTH_SECRET` | `tailscale/github-action` | секрет того же клиента |
-| `DB_PASSWORD` | security, user, business, billing, gen-ort, content, audit | пароль `ETA_DBUser` (общий на все БД). Должен совпадать с `POSTGRES_PASSWORD` в ops |
+| `POSTGRES_PASSWORD` | security, user, business, billing, gen-ort, content, audit | пароль `ETA_DBUser` (общий на все БД). Должен совпадать с `POSTGRES_PASSWORD` в ops. `DB_PASSWORD` оставлен как fallback в workflow/compose |
+| `POSTGRES_USER` | те же сервисы | опционально, дефолт `ETA_DBUser` (совпадает с ops) |
+| `RABBITMQ_USER` | security, user, business, notification, billing, gen-ort, audit | опционально, дефолт `service-user` |
+| `RABBITMQ_PASS` | те же сервисы | пароль `service-user`; дефолт `servicepassword`. Должен совпадать с `RABBITMQ_PASS` в ops |
 | `JWT_SECRET_ACCESS` | gateway, security, billing, gen-ort | база подписи access-токенов, base64, одинаковая во всех сервисах |
 | `DEFAULT_ADMIN_EMAIL` | security | `superadmin@adminparadise.ru` — админ создаётся при первом старте |
 | `DEFAULT_ADMIN_PASSWORD` | security | пароль дефолтного админа; применяется только при создании |
@@ -110,8 +113,9 @@
 | `SERVER_TAILSCALE_IP` | да | ssh/scp | Tailscale-IP сервера |
 | `SERVER_USER` | да | ssh/scp | `n4d3sh1k4` |
 | `SERVER_SSH_KEY` | да | ssh/scp | тот же ключ, что в бэкенде |
-| `POSTGRES_PASSWORD` | да | `postgres-db` | пароль `ETA_DBUser`; **равен** `DB_PASSWORD` бэкенда |
-| `RABBITMQ_PASS` | да | `rabbitmq` | пароль `service-user`. В сервисах он захардкожен как `servicepassword` в `application-prod.yml` — менять только вместе с кодом |
+| `POSTGRES_PASSWORD` | да | `postgres-db` | пароль `ETA_DBUser`; **равен** `POSTGRES_PASSWORD` бэкенда (бывш. `DB_PASSWORD`) |
+| `RABBITMQ_USER` | нет | `rabbitmq` | дефолт `service-user`; совпадает с `RABBITMQ_USER` бэкенда |
+| `RABBITMQ_PASS` | да | `rabbitmq` | пароль `service-user`; сервисы читают тот же `RABBITMQ_PASS` |
 | `MINIO_ROOT_PASSWORD` | да | `minio` | пароль root MinIO. Если сервисы ходят под `admin` (`MINIO_*` не заданы) — менять синхронно |
 
 ## Дефолты compose (в CI не передаются)
@@ -140,9 +144,9 @@
 
 | OPS | Бэкенд | Комментарий |
 |---|---|---|
-| `POSTGRES_PASSWORD` | `DB_PASSWORD` | иначе сервисы не подключатся к БД |
+| `POSTGRES_PASSWORD` | `POSTGRES_PASSWORD` (бывш. `DB_PASSWORD`) | иначе сервисы не подключатся к БД |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | — | root нужен только ops и админке: приложение ходит под scoped-юзерами (`MINIO_*`, `USER_MINIO_*`, `BUSINESS_MINIO_*`, `CONTENT_MINIO_*`) |
-| `RABBITMQ_PASS` | `RABBITMQ_PASS` (после унификации) | сейчас в prod-YML сервисов захардкожен `servicepassword` |
+| `RABBITMQ_USER` / `RABBITMQ_PASS` | `RABBITMQ_USER` / `RABBITMQ_PASS` | имена унифицированы; в prod-YML больше нет хардкода |
 | `TS_*`, `SERVER_*` | те же имена | один Tailscale/SSH-доступ |
 
 ## Проверить
@@ -154,5 +158,6 @@ gh secret list   --repo N4d3sh1k4-UCust-Developing/ops
 ```
 
 Полный список переменных системы (включая серверный `.env`, дефолты compose и
-тюнинги приложения) — `docs/env-inventory.md`. Шаблоны для заполнения —
+тюнинги приложения) — `docs/env-inventory.md` (файл **локальный**, в git не
+хранится: там проставлены реальные значения). Шаблоны для заполнения —
 `.env.example` (бэкенд) и `ops/.env.example`.
