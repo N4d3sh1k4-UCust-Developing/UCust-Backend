@@ -83,8 +83,8 @@ services:
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
-      - MINIO_ACCESS_KEY=${USER_MINIO_ACCESS_KEY:-admin}
-      - MINIO_SECRET_KEY=${USER_MINIO_SECRET_KEY:-password123}
+      - MINIO_ACCESS_KEY=${USER_MINIO_ACCESS_KEY:-user-service-user}
+      - MINIO_SECRET_KEY=${USER_MINIO_SECRET_KEY:-usr-strong-pass}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -102,6 +102,8 @@ services:
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
+      - MINIO_ACCESS_KEY=${BUSINESS_MINIO_ACCESS_KEY:-business-service-user}
+      - MINIO_SECRET_KEY=${BUSINESS_MINIO_SECRET_KEY:-bus-strong-pass}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -210,8 +212,8 @@ services:
       - AI_ORCHESTRATOR_ENDPOINT=${AI_ORCHESTRATOR_ENDPOINT}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-generative-orchestration-user}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-gen-strong-pass}
       - MINIO_PUBLIC_BASE_URL=${MINIO_PUBLIC_BASE_URL}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_BOT_PROXY=${TELEGRAM_BOT_PROXY:-http://xray:1080}

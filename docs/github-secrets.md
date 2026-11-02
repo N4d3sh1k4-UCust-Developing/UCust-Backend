@@ -53,6 +53,8 @@
 | `CONTENT_MINIO_ACCESS_KEY` | content-service | `content-service-user` |
 | `CONTENT_MINIO_SECRET_KEY` | content-service | пароль этого юзера (`ct-strong-pass` в `minio-init`) |
 | `CONTENT_MINIO_PUBLIC_BASE_URL` | content-service | `https://api.ucust.n4d3sh1k4.site/s3/content-service` |
+| `MINIO_ACCESS_KEY` | gen-ort (медиа постов) | `generative-orchestration-user` (scoped-юзер из `minio-init`) |
+| `MINIO_SECRET_KEY` | gen-ort (медиа постов) | пароль этого юзера (`gen-strong-pass` в `minio-init`) |
 
 ## Secrets — необязательные
 
@@ -77,9 +79,9 @@
 |---|---|---|---|
 | `QUOTA_FREE_UNLIMITED` | `false` | billing (FREE = `-1` во всех лимитах) | `true` |
 | `MINIO_ENDPOINT` | `http://minio:9000` | content, gen-ort | не задан |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | — | gen-ort (медиа) | `admin` / `password123` |
 | `MINIO_PUBLIC_BASE_URL` | — | gen-ort | `https://api.ucust.n4d3sh1k4.site/s3/generative-orchestration` |
-| `USER_MINIO_ACCESS_KEY` / `USER_MINIO_SECRET_KEY` | `admin` / `password123` | user-service (аватары) | не заданы |
+| `USER_MINIO_ACCESS_KEY` / `USER_MINIO_SECRET_KEY` | `user-service-user` / `usr-strong-pass` | user-service (аватары) | не заданы |
+| `BUSINESS_MINIO_ACCESS_KEY` / `BUSINESS_MINIO_SECRET_KEY` | `business-service-user` / `bus-strong-pass` | business-service (логотипы) | не заданы |
 | `MINIO_S3_URI` | `http://minio:9000` | gateway (`/s3/**`) | не задан |
 
 ## Что ломается, если секрет пустой
@@ -139,8 +141,8 @@
 | OPS | Бэкенд | Комментарий |
 |---|---|---|
 | `POSTGRES_PASSWORD` | `DB_PASSWORD` | иначе сервисы не подключатся к БД |
-| `MINIO_ROOT_USER` | `MINIO_ACCESS_KEY` | сейчас `admin` |
-| `MINIO_ROOT_PASSWORD` | `MINIO_SECRET_KEY`, `USER_MINIO_SECRET_KEY`, `CONTENT_MINIO_SECRET_KEY` | если сервисы ходят под root `admin` |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | — | root нужен только ops и админке: приложение ходит под scoped-юзерами (`MINIO_*`, `USER_MINIO_*`, `BUSINESS_MINIO_*`, `CONTENT_MINIO_*`) |
+| `RABBITMQ_PASS` | `RABBITMQ_PASS` (после унификации) | сейчас в prod-YML сервисов захардкожен `servicepassword` |
 | `TS_*`, `SERVER_*` | те же имена | один Tailscale/SSH-доступ |
 
 ## Проверить
