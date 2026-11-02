@@ -54,8 +54,8 @@
 | `CONTENT_MINIO_ACCESS_KEY` | content-service | `content-service-user` |
 | `CONTENT_MINIO_SECRET_KEY` | content-service | пароль этого юзера (`ct-strong-pass` в `minio-init`) |
 | `CONTENT_MINIO_PUBLIC_BASE_URL` | content-service | `https://api.ucust.n4d3sh1k4.site/s3/content-service` |
-| `MINIO_ACCESS_KEY` | gen-ort (медиа постов) | `generative-orchestration-user` (scoped-юзер из `minio-init`) |
-| `MINIO_SECRET_KEY` | gen-ort (медиа постов) | пароль этого юзера (`gen-strong-pass` в `minio-init`) |
+| `GEN_ORCHESTRATION_MINIO_ACCESS_KEY` | gen-ort (медиа постов) | `generative-orchestration-user` (scoped-юзер из `minio-init`) |
+| `GEN_ORCHESTRATION_MINIO_SECRET_KEY` | gen-ort (медиа постов) | пароль этого юзера (`gen-strong-pass` в `minio-init`) |
 | `USER_MINIO_ACCESS_KEY` / `USER_MINIO_SECRET_KEY` | user-service (аватары) | `user-service-user` / `usr-strong-pass` |
 | `BUSINESS_MINIO_ACCESS_KEY` / `BUSINESS_MINIO_SECRET_KEY` | business-service (логотипы) | `business-service-user` / `bus-strong-pass` |
 
