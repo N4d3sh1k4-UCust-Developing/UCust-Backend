@@ -143,20 +143,14 @@
 | `MINIO_ROOT_PASSWORD` | `MINIO_SECRET_KEY`, `USER_MINIO_SECRET_KEY`, `CONTENT_MINIO_SECRET_KEY` | если сервисы ходят под root `admin` |
 | `TS_*`, `SERVER_*` | те же имена | один Tailscale/SSH-доступ |
 
-## Проверить / добавить
+## Проверить
 
 ```powershell
-# что задано
 gh secret list   --repo N4d3sh1k4-UCust-Developing/UCust-Backend
 gh variable list --repo N4d3sh1k4-UCust-Developing/UCust-Backend
 gh secret list   --repo N4d3sh1k4-UCust-Developing/ops
-
-# идемпотентно проставить недостающее (нужен gh + gh auth login)
-.\scripts\set-github-actions.ps1 -DryRun          # только показать
-.\scripts\set-github-actions.ps1 -TelegramBotToken '123456:AA...'
 ```
 
-Скрипт: задаёт `CORS_ALLOWED_ORIGINS`, `AI_ORCHESTRATOR_ENDPOINT`,
-`INTERNAL_API_SECRET` (генерирует, если не задан) и (опционально)
-`TELEGRAM_BOT_TOKEN`/`TELEGRAM_BOT_PROXY`, после чего печатает список
-недостающих секретов по обоим репозиториям.
+Полный список переменных системы (включая серверный `.env`, дефолты compose и
+тюнинги приложения) — `docs/env-inventory.md`. Шаблоны для заполнения —
+`.env.example` (бэкенд) и `ops/.env.example`.

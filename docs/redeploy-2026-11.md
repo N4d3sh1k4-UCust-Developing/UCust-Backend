@@ -26,6 +26,8 @@ scoped-юзеров, `DataInitializer` — роли и админа.
       (Settings → Secrets and variables → Actions → Variables) — список origin'ов
       для CORS гейта через запятую, без пробелов. Если не задана, используется
       дефолт из `api-gateway/application-prod.yml` (прод-домены).
+- [ ] Полный список переменных и их назначение — `docs/env-inventory.md`;
+      шаблон серверного `.env` — `.env.example` (для ops — `ops/.env.example`).
 - [ ] AI-шлюз доступен с сервера: `curl -m 5 http://<host>:8000/`.
       На 02.11.2026 `10.0.0.2:8000` пингуется, но TCP закрыт; `wg-ucust`
       до `11.0.0.2` без handshake. Пока шлюз не поднят, генерации и анализы
