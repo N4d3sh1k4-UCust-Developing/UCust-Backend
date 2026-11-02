@@ -33,9 +33,7 @@
 | `TS_OAUTH_CLIENT_ID` | `tailscale/github-action` | OAuth-клиент Tailscale, тег `tag:ci` |
 | `TS_OAUTH_SECRET` | `tailscale/github-action` | секрет того же клиента |
 | `POSTGRES_PASSWORD` | security, user, business, billing, gen-ort, content, audit | пароль `ETA_DBUser` (общий на все БД). Должен совпадать с `POSTGRES_PASSWORD` в ops. `DB_PASSWORD` оставлен как fallback в workflow/compose |
-| `POSTGRES_USER` | те же сервисы | опционально, дефолт `ETA_DBUser` (совпадает с ops) |
-| `RABBITMQ_USER` | security, user, business, notification, billing, gen-ort, audit | опционально, дефолт `service-user` |
-| `RABBITMQ_PASS` | те же сервисы | пароль `service-user`; дефолт `servicepassword`. Должен совпадать с `RABBITMQ_PASS` в ops |
+| `RABBITMQ_PASS` | security, user, business, notification, billing, gen-ort, audit | пароль `service-user`; дефолт `servicepassword`. Должен совпадать с `RABBITMQ_PASS` в ops |
 | `JWT_SECRET_ACCESS` | gateway, security, billing, gen-ort | база подписи access-токенов, base64, одинаковая во всех сервисах |
 | `DEFAULT_ADMIN_EMAIL` | security | `superadmin@adminparadise.ru` — админ создаётся при первом старте |
 | `DEFAULT_ADMIN_PASSWORD` | security | пароль дефолтного админа; применяется только при создании |
@@ -58,6 +56,8 @@
 | `CONTENT_MINIO_PUBLIC_BASE_URL` | content-service | `https://api.ucust.n4d3sh1k4.site/s3/content-service` |
 | `MINIO_ACCESS_KEY` | gen-ort (медиа постов) | `generative-orchestration-user` (scoped-юзер из `minio-init`) |
 | `MINIO_SECRET_KEY` | gen-ort (медиа постов) | пароль этого юзера (`gen-strong-pass` в `minio-init`) |
+| `USER_MINIO_ACCESS_KEY` / `USER_MINIO_SECRET_KEY` | user-service (аватары) | `user-service-user` / `usr-strong-pass` |
+| `BUSINESS_MINIO_ACCESS_KEY` / `BUSINESS_MINIO_SECRET_KEY` | business-service (логотипы) | `business-service-user` / `bus-strong-pass` |
 
 ## Secrets — необязательные
 
@@ -73,6 +73,9 @@
 | Переменная | Обяз. | Значение |
 |---|---|---|
 | `CORS_ALLOWED_ORIGINS` | нет | origin'ы через запятую **без пробелов**, напр. `https://ucust.ru,https://www.ucust.ru,https://adm.ucust.n4d3sh1k4.site`. Не задана → дефолт из compose/`application-prod.yml` |
+| `POSTGRES_USER` | нет | дефолт `ETA_DBUser`; должен совпадать с `POSTGRES_USER` в ops |
+| `RABBITMQ_USER` | нет | дефолт `service-user`; должен совпадать с `RABBITMQ_USER` в ops |
+| `MINIO_PUBLIC_BASE_URL` | нет | публичный URL бакета медиа: `https://api.ucust.n4d3sh1k4.site/s3/generative-orchestration`; должен быть доступен AI-контуру |
 
 ## Не идут через Actions (только `.env` на сервере)
 
@@ -82,9 +85,6 @@
 |---|---|---|---|
 | `QUOTA_FREE_UNLIMITED` | `false` | billing (FREE = `-1` во всех лимитах) | `true` |
 | `MINIO_ENDPOINT` | `http://minio:9000` | content, gen-ort | не задан |
-| `MINIO_PUBLIC_BASE_URL` | — | gen-ort | `https://api.ucust.n4d3sh1k4.site/s3/generative-orchestration` |
-| `USER_MINIO_ACCESS_KEY` / `USER_MINIO_SECRET_KEY` | `user-service-user` / `usr-strong-pass` | user-service (аватары) | не заданы |
-| `BUSINESS_MINIO_ACCESS_KEY` / `BUSINESS_MINIO_SECRET_KEY` | `business-service-user` / `bus-strong-pass` | business-service (логотипы) | не заданы |
 | `MINIO_S3_URI` | `http://minio:9000` | gateway (`/s3/**`) | не задан |
 
 ## Что ломается, если секрет пустой
@@ -116,7 +116,7 @@
 | `POSTGRES_PASSWORD` | да | `postgres-db` | пароль `ETA_DBUser`; **равен** `POSTGRES_PASSWORD` бэкенда (бывш. `DB_PASSWORD`) |
 | `RABBITMQ_USER` | нет | `rabbitmq` | дефолт `service-user`; совпадает с `RABBITMQ_USER` бэкенда |
 | `RABBITMQ_PASS` | да | `rabbitmq` | пароль `service-user`; сервисы читают тот же `RABBITMQ_PASS` |
-| `MINIO_ROOT_PASSWORD` | да | `minio` | пароль root MinIO. Если сервисы ходят под `admin` (`MINIO_*` не заданы) — менять синхронно |
+| `MINIO_ROOT_PASSWORD` | да | `minio` | пароль root MinIO. Приложение ходит под scoped-юзерами, поэтому менять синхронно с бэкендом нужно только если root используется где-то ещё |
 
 ## Дефолты compose (в CI не передаются)
 
@@ -126,7 +126,7 @@
 | `POSTGRES_PORT` | `5440` | внутри сети — 5432 |
 | `RABBITMQ_AMQP_PORT` | `5680` | |
 | `RABBITMQ_MGMT_PORT` | `15673` | UI `/admin/rabbit` |
-| `MINIO_ROOT_USER` | `admin` | совпадает с `MINIO_ACCESS_KEY` бэкенда |
+| `MINIO_ROOT_USER` | `admin` | root-пользователь MinIO; не связан со scoped-юзерами приложения |
 | `MINIO_API_PORT` / `MINIO_CONSOLE_PORT` | `9020` / `9021` | |
 | `PGADMIN_EMAIL` / `PGADMIN_PASSWORD` | `admin@ucust.ru` / `devpassword123` | ⚠️ слабый дефолт; сервис только по `--profile tools` |
 | `PGADMIN_PORT` | `9022` | |

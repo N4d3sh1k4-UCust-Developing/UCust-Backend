@@ -60,6 +60,7 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - YANDEX_CLIENT_ID=${YANDEX_CLIENT_ID}
       - YANDEX_CLIENT_SECRET=${YANDEX_CLIENT_SECRET}
@@ -86,6 +87,7 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
       - MINIO_ACCESS_KEY=${USER_MINIO_ACCESS_KEY:-user-service-user}
       - MINIO_SECRET_KEY=${USER_MINIO_SECRET_KEY:-usr-strong-pass}
@@ -107,6 +109,7 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
       - MINIO_ACCESS_KEY=${BUSINESS_MINIO_ACCESS_KEY:-business-service-user}
       - MINIO_SECRET_KEY=${BUSINESS_MINIO_SECRET_KEY:-bus-strong-pass}
@@ -126,10 +129,11 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
-      - CONTENT_MINIO_ACCESS_KEY=${CONTENT_MINIO_ACCESS_KEY:-content-service-user}
-      - CONTENT_MINIO_SECRET_KEY=${CONTENT_MINIO_SECRET_KEY:-ct-strong-pass}
-      - CONTENT_MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.n4d3sh1k4.site/s3/content-service}
+      - MINIO_ACCESS_KEY=${CONTENT_MINIO_ACCESS_KEY:-content-service-user}
+      - MINIO_SECRET_KEY=${CONTENT_MINIO_SECRET_KEY:-ct-strong-pass}
+      - MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.n4d3sh1k4.site/s3/content-service}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -148,6 +152,7 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -194,6 +199,7 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - QUOTA_FREE_UNLIMITED=${QUOTA_FREE_UNLIMITED:-false}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
@@ -217,6 +223,7 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
+      - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       # Адреса внутренних сервисов: по умолчанию имена контейнеров в ucust-net.
       # Переопределять только для отладки (напр. направить в staging).
