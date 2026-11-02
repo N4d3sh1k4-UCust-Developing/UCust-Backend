@@ -202,6 +202,10 @@ services:
       - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
       - DB_PASSWORD=${DB_PASSWORD}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
+      # Адреса внутренних сервисов: по умолчанию имена контейнеров в ucust-net.
+      # Переопределять только для отладки (напр. направить в staging).
+      - BUSINESS_SERVICE_URI=${BUSINESS_SERVICE_URI:-http://business-service:8104}
+      - BILLING_SERVICE_URI=${BILLING_SERVICE_URI:-http://billing-service:8106}
       - AI_SERVICE_URI=${AI_SERVICE_URI}
       - AI_ORCHESTRATOR_ENDPOINT=${AI_ORCHESTRATOR_ENDPOINT}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}

@@ -110,8 +110,8 @@
 
 | Переменная | Кто читает | Дефолт | Примечание |
 |---|---|---|---|
-| `BILLING_SERVICE_URI` | gen-ort | `http://billing-service:8106` | в prod-YML тем же именем задан и `business-service.uri` — **опечатка**, работает только на дефолте |
-| `BUSINESS_SERVICE_URI` | gen-ort (dev) | `http://localhost:8104` | в prod используется `BILLING_SERVICE_URI` (см. выше) |
+| `BILLING_SERVICE_URI` | gen-ort (`services.billing-service.uri`) | `http://billing-service:8106` | опционально; в compose есть дефолт |
+| `BUSINESS_SERVICE_URI` | gen-ort (`services.business-service.uri`) | `http://business-service:8104` | опционально; в compose есть дефолт. Раньше prod-YML ошибочно читал здесь `BILLING_SERVICE_URI` — исправлено |
 | `MINIO_ADMIN_URI` | gateway | константа в compose `http://minio-ucust:9001` | ссылка для админ-панели |
 | `RABBITMQ_ADMIN_URI` | gateway | `http://rabbitmq-ucust:15672` | |
 | `PGADMIN_URI` | gateway | `http://pgadmin-ucust:80` | |
@@ -145,7 +145,7 @@
 | 2 | `INTERNAL_API_SECRET` пустой | billing отдаёт 401 на `/internal/quota/*` → квоты блокируют генерацию; callback контура не проходит |
 | 3 | `AI_ORCHESTRATOR_ENDPOINT` пустой | все генерации/анализы падают; снаружи `10.0.0.2:8000` не отвечает |
 | 4 | `AI_SERVICE_URI` | нигде не читается — удалить из secrets/workflow/compose |
-| 5 | `business-service.uri: ${BILLING_SERVICE_URI:http://business-service:8104}` в gen-ort prod-YML | при заданном `BILLING_SERVICE_URI` business-запросы уйдут в billing |
+| 5 | `business-service.uri: ${BILLING_SERVICE_URI:http://business-service:8104}` в gen-ort prod-YML | при заданном `BILLING_SERVICE_URI` business-запросы ушли бы в billing. **Исправлено** на `BUSINESS_SERVICE_URI` |
 | 6 | `SERVER_TAILSCALE_IP` | в Java/YML не читается; прокидывается в user/business зря — легаси |
 | 7 | Дефолты-секреты в репозитории | `devpassword123`, `admin`/`password123`, `123456nl`, `ucust-super-secret-service-token-2026`, Mailtrap-креды (`a9f3052b45461a` / `ae4e25c063dcb8`) в `docker-compose.yml` и dev-YML |
 | 8 | `MAIL_FROM` дефолт `-` в compose | при пустой переменной в заголовок `From` попадёт мусор |
