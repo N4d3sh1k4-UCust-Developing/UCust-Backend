@@ -36,6 +36,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://api.ucust.n4d3sh1k4.site,https://adm.ucust.n4d3sh1k4.site,https://ucust.ru,https://www.ucust.ru}
       - PGADMIN_URI=http://pgadmin-ucust:80
       - RABBITMQ_ADMIN_URI=http://rabbitmq-ucust:15672
       - MINIO_ADMIN_URI=http://minio-ucust:9001

@@ -22,6 +22,10 @@ scoped-юзеров, `DataInitializer` — роли и админа.
 - [ ] В `~/projects/ucust/.env` заполнены пустые сейчас ключи:
       `AI_ORCHESTRATOR_ENDPOINT`, `AI_SERVICE_URI`, `INTERNAL_API_SECRET`,
       `TELEGRAM_BOT_TOKEN`.
+- [ ] (опционально) Repository variable `CORS_ALLOWED_ORIGINS` в GitHub Actions
+      (Settings → Secrets and variables → Actions → Variables) — список origin'ов
+      для CORS гейта через запятую, без пробелов. Если не задана, используется
+      дефолт из `api-gateway/application-prod.yml` (прод-домены).
 - [ ] AI-шлюз доступен с сервера: `curl -m 5 http://<host>:8000/`.
       На 02.11.2026 `10.0.0.2:8000` пингуется, но TCP закрыт; `wg-ucust`
       до `11.0.0.2` без handshake. Пока шлюз не поднят, генерации и анализы
