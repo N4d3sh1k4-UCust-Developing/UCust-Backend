@@ -25,6 +25,7 @@
         "/api/v0/oauth2/**",
         "/api/v0/login/oauth2/**",
         "/api/v0/tariffs",
+        "/api/v0/tariffs/public",
         "/api/v0/tariffs/{id}",
         "/api/v0/content/faq",
         "/api/v0/content/documents",
@@ -85,7 +86,9 @@
                   "lastName": { "type": "string", "required": true, "description": "Фамилия" },
                   "email": { "type": "string", "required": true, "description": "Почта" },
                   "password": { "type": "string", "required": true, "description": "Пароль" },
-                  "confirmPassword": { "type": "string", "required": true, "description": "Повтор пароля" }
+                  "confirmPassword": { "type": "string", "required": true, "description": "Повтор пароля" },
+                  "marketingConsent": { "type": "boolean", "required": false, "default": false, "description": "Согласие на рекламную рассылку" },
+                  "personalDataConsent": { "type": "boolean", "required": false, "default": false, "description": "Согласие на обработку персональных данных" }
                 },
                 "response": "200 OK — регистрация не выдаёт JWT и не ставит куку; дальше подтвердить email и залогиниться",
                 "responses": [
@@ -621,9 +624,20 @@
                 "path": "/api/v0/tariffs",
                 "summary": "Все тарифы",
                 "auth": "public",
-                "response": "TariffResponse[] { id, name, cost, description, features: string[], ctaText, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }",
+                "response": "TariffResponse[] { id, name, cost, description, features: string[], ctaText, displayOrder, highlighted, showOnHomepage, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }. Лимиты projects/posts/aiGenerations = -1 означают «без ограничений».",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<TariffResponse[]> — публичный эндпоинт, gateway-роут без authFilter, в сервисе GET /tariffs/** permitAll" },
+                    { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при чтении тарифов" }
+                  ]
+              },
+              {
+                "method": "GET",
+                "path": "/api/v0/tariffs/public",
+                "summary": "Тарифы для главной страницы (только showOnHomepage != false)",
+                "auth": "public",
+                "response": "TariffResponse[] — тот же контракт, что у /api/v0/tariffs, но скрытые админом тарифы (showOnHomepage=false, например служебный ADMIN) отфильтрованы. NULL в БД трактуется как «показывать».",
+                "responses": [
+                    { "status": 200, "description": "ApiResponse<TariffResponse[]> — витрина тарифов для лендинга" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД при чтении тарифов" }
                   ]
               },
@@ -633,7 +647,7 @@
                 "summary": "Тариф по ID",
                 "auth": "public",
                 "pathParams": { "id": "UUID" },
-                "response": "TariffResponse { id, name, cost, description, features: string[], ctaText, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }",
+                "response": "TariffResponse { id, name, cost, description, features: string[], ctaText, displayOrder, highlighted, showOnHomepage, projects, posts, chatBotType, supportType, analyticsType, aiGenerations }. Лимиты -1 = «без ограничений».",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<TariffResponse> — публичный эндпоинт, 401/403 неприменимы" },
                     { "status": 404, "code": "NOT_FOUND", "when": "тарифа с таким id нет" },
@@ -1325,7 +1339,7 @@
                 "path": "/api/v0/content/footer",
                 "summary": "Карточки футера с контактами",
                 "auth": "public",
-                "response": "FooterCard[] { id, order, title, items: FooterItem[] }; FooterItem { label, value, href, icon }",
+                "response": "FooterCard[] { id, code, order, title, items: FooterItem[] }; FooterItem { label, value, href, icon, iconUrl, type, targetBlank }. Карточка code=socials задаёт соцсети (type=SOCIAL), iconUrl — загруженная картинка.",
                 "responses": [
                     { "status": 200, "description": "ApiResponse<FooterCard[]> — сортировка по order, контакты внутри карточек" },
                     { "status": 500, "code": "INTERNAL_SERVER_ERROR", "when": "ошибка БД" }

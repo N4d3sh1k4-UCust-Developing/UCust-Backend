@@ -14,8 +14,8 @@
 (`security-service-public`, `billing-tariffs-public`, `ai-callback-public`), а `/tariffs/**`
 дополнительно закрыт `hasRole("ADMIN")` на стороне billing.
 
-**Итого через gateway:** 118 API-методов (33 security + 7 user + 11 business + 16 billing + 36 GOS + 15 content).
-**Admin-методов с `ROLE_ADMIN`: 52** (27 было + P0 2026-10-07 + P1 2026-10-08: биллинг 6, проекты 2, посты 3, задачи 3 + content 2026-10-10: FAQ 3, documents 3, footer 3, brand 2).
+**Итого через gateway:** 119 API-методов (33 security + 7 user + 11 business + 16 billing + 36 GOS + 16 content).
+**Admin-методов с `ROLE_ADMIN`: 53** (27 было + P0 2026-10-07 + P1 2026-10-08: биллинг 6, проекты 2, посты 3, задачи 3 + content 2026-10-10: FAQ 3, documents 3, footer 4, brand 2).
 
 ---
 
@@ -65,7 +65,7 @@
 | 40 | POST | `/api/v0/admin/orchestration/tasks/{id}/retry` | Перезапуск упавшей задачи: сброс ошибки, новый плейсхолдер, фоновая генерация → 202 `AsyncGenerateResponse`; COMPLETED / in-flight — 409 `TASK_ALREADY_COMPLETED`/`TASK_IN_FLIGHT`; нет — 404 | GOS |
 | 41 | DELETE | `/api/v0/admin/orchestration/tasks/{id}` | Удаление задачи: снятие незаполненных заглушек, готовые посты сохраняются → 204; in-flight — 409 | GOS |
 
-**content-service (2026-10-10, см. §8):** 11 admin-эндпоинтов — FAQ (3), documents (3), footer (3), brand (2).
+**content-service (2026-10-10, см. §8):** 12 admin-эндпоинтов — FAQ (3), documents (3), footer (4), brand (2).
 
 **Тарифы (не под `/admin/**`, но с ролью):** `GET /api/v0/tariffs[/{id}]` — публичный
 (`billing-tariffs-public`, GET-only, заголовки `X-User-Id`/`X-User-Roles` срезаются);
@@ -327,7 +327,7 @@
 ## 8. content-service — контент сайта (2026-10-10)
 
 Новый сервис `content-service` (`:8108`, DB `content_service_db`, MinIO-бакет `content-service`)
-заменил фронтовые моки FAQ/юридических документов/футера/брендбука. 4 публичных + 11 admin-эндпоинтов.
+заменил фронтовые моки FAQ/юридических документов/футера/брендбука. 4 публичных + 12 admin-эндпоинтов.
 
 **Публичное чтение** (роут gateway `content-service-public`, stripPrefix(2), `X-User-Id`/`X-User-Roles` срезаются):
 - `GET /api/v0/content/faq` → `FaqItemResponse[] {id, order, question, answer, enabled}`;
@@ -350,7 +350,10 @@
 | 9 | DELETE | `/api/v0/admin/content/footer/{id}` | Удалить → 204 |
 | 10 | PUT | `/api/v0/admin/content/brand/logo` | Загрузить логотип (multipart `file`) |
 | 11 | PUT | `/api/v0/admin/content/brand/bimi` | Загрузить BIMI-SVG (multipart `file`) |
+| 12 | POST | `/api/v0/admin/content/footer/icon` | Загрузить картинку элемента футера (multipart `file`): PNG/JPEG → WebP через `cwebp`, ответ `{url, contentType, width, height, converted}` |
 
 PDF-документы и бренд-ассеты раздаются публичным gateway-роутом `/s3/**` (target `minio.s3.uri`).
-Сиды FAQ/футера/брендбука — `DataInitializer`. Тестов в сервисе пока нет (нет каталога `src/test`);
-сборка `content-service` — `BUILD SUCCESSFUL`.
+Карточка `code=socials` (сид `DataInitializer.seedFooterSocials`) задаёт соцсети футера; картинки
+загружаются через `/admin/content/footer/icon` и хранятся в `footer/icons/{uuid}.webp`.
+Сиды FAQ/футера/брендбука — `DataInitializer`. Тесты сервиса: `FooterIconServiceTest` (6),
+`FooterServiceTest` (4), `WebpImageConverterTest` (2); сборка `content-service` — `BUILD SUCCESSFUL`.
