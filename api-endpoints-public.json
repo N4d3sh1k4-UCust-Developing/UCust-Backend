@@ -1132,7 +1132,7 @@
                   "projectId": { "type": "UUID", "required": false },
                   "documents": { "type": "string[]", "required": false, "description": "data-URL документов (PDF/DOCX/PPTX/TXT/CSV...), max 10 шт по 2 МБ" }
                 },
-                "response": "AnalysisResponse { id, sessionId, taskType, status, profile, result, error }",
+                "response": "AnalysisResponse { id, sessionId, taskType, status, profile, result, error }; локация (city/region/country/street/house) из result.business/prefilled_profile применяется к проекту через ProjectPatch",
                 "responses": [
                     { "status": 200, "description": "AnalysisResponse { sessionId, taskType (quick_scan / analyze_documents / onboard_user), status (PENDING / COMPLETED / FAILED), profile, result }. Недоступность и таймаут Шлюза запрос НЕ роняют: анализ помечается FAILED в теле, ошибка в errorMessage." },
                     { "status": 400, "code": "VALIDATION_ERROR", "when": "@Valid AnalysisRequest: companyName > 100, url > 2000, notes > 10000, documents > 10 штук или один документ > 2 000 000 символов" },

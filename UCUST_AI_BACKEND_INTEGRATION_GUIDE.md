@@ -450,7 +450,7 @@ curl -X POST "http://localhost:8000/api/v1/projects/surf_coffee_101/commit" \
   -H "X-Internal-Secret: ucust-super-secret-service-token-2026" \
   -d '{
     "data": {
-      "about": { "name": "Surf Coffee", "niche": "Спешелти кофейня", "city": "Москва" },
+      "about": { "name": "Surf Coffee", "niche": "Спешелти кофейня", "city": "Москва", "region": "Москва", "country": "Россия", "street": "ул. Большая Дмитровка", "house": "12" },
       "audience": { "target": "Молодые специалисты, любители качественного кофе" },
       "offerings": { "main_products": ["Фильтр-кофе", "Матча латте", "Круассаны"] },
       "voice": { "tone": "Дружелюбный, теплый, стильный" }
@@ -757,7 +757,11 @@ curl -X POST "http://localhost:8000/api/v1/projects/analyze" \
     "about": {
       "name": "Chop-Chop",
       "niche": "Мужской барбершоп",
-      "city": "Москва"
+      "city": "Москва",
+      "region": "Москва",
+      "country": "Россия",
+      "street": "ул. Большая Дмитровка",
+      "house": "12"
     },
     "audience": {
       "target": "Мужчины 20-45 лет, ценящие классический стиль и качественный сервис"
@@ -781,7 +785,7 @@ curl -X POST "http://localhost:8000/api/v1/projects/chopchop_moscow/commit" \
   -H "X-Internal-Secret: ucust-super-secret-service-token-2026" \
   -d '{
     "data": {
-      "about": { "name": "Chop-Chop", "niche": "Барбершоп", "city": "Москва" },
+      "about": { "name": "Chop-Chop", "niche": "Барбершоп", "city": "Москва", "region": "Москва", "country": "Россия", "street": "ул. Большая Дмитровка", "house": "12" },
       "audience": { "target": "Мужчины 20-45 лет" },
       "offerings": { "main_products": ["Стрижка", "Борода"] },
       "voice": { "tone": "Лаконичный" }

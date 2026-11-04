@@ -353,6 +353,9 @@ components:
         country: { type: string }
         street: { type: string }
         house: { type: string }
+        address:
+          type: string
+          description: "Полный адрес одной строкой; используется как fallback, если street/house не разделены."
         social_links: { $ref: '#/components/schemas/SocialLinksBlock' }
         business_hours: { $ref: '#/components/schemas/BusinessHoursBlock' }
 
@@ -881,6 +884,10 @@ components:
             industry_raw: кофейня
             description: Specialty-кофейня с собственной обжаркой
             city: Казань
+            region: Республика Татарстан
+            country: Россия
+            street: ул. Баумана
+            house: "12"
             social_links: { website: "https://example-coffee.ru" }
             business_hours: { open_time: "08:00", close_time: "21:00", off_days: [] }
           brand:
@@ -1075,7 +1082,7 @@ x-backend-mapping:
   evidence.raw: RAG brand_profile:{projectId}
   warnings/needs_input: AnalysisResponse / онбординг-UI
   required_backend_changes:
-    - Расширить ProjectPatch/UpdateProjectRequest полями street/house/businessHours/phone/email
+    - ProjectPatch: street/house поддержаны (city/region/country уже были); businessHours/phone/email пока нет (phone/email не поля Project)
     - Расширить форму brandProfile-JSON секциями analytics/audience/comparison
     - Многостадийная домиксовка в BusinessAnalysisService вместо единственного complete()
 
