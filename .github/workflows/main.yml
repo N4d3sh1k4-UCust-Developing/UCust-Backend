@@ -23,6 +23,26 @@ jobs:
           token: ${{ secrets.SUBMODULES_PAT }}
           submodules: recursive
 
+      # Dockerfile'ы собирают каждый сервис как самостоятельный Gradle-проект
+      # (COPY common + COPY <service>, затем ./gradlew build). Если в сервисе
+      # нет wrapper'а или settings.gradle, сборка падает на `chmod +x gradlew`
+      # уже внутри матрицы — проверяем заранее и одним прогоном.
+      - name: Verify services are buildable standalone
+        if: matrix.service == 'api-gateway'
+        run: |
+          missing=0
+          for s in api-gateway security-service user-service business-service \
+                   notification-service billing-service generative-orchestration-service \
+                   content-service audit-log-service; do
+            for f in gradlew settings.gradle; do
+              if [ ! -f "$s/$f" ]; then
+                echo "::error::$s is missing $f (its Dockerfile builds the service standalone)"
+                missing=1
+              fi
+            done
+          done
+          exit $missing
+
       - name: Lowercase Registry Owner
         run: |
           echo "OWNER_LC=${OWNER,,}" >> ${GITHUB_ENV}
