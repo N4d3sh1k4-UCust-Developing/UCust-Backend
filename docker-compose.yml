@@ -34,7 +34,7 @@ services:
       - "8100:8100"
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://ucust.ru,https://www.ucust.ru,https://adm.ucust.n4d3sh1k4.site,https://svoadmin.ucust.ru}
       - PGADMIN_URI=http://pgadmin-ucust:80
@@ -58,7 +58,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
@@ -86,7 +86,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
@@ -108,7 +108,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
@@ -128,7 +128,7 @@ services:
     container_name: content-service-ucust
     environment:
       - SPRING_PROFILES_ACTIVE=prod
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
@@ -151,7 +151,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
     networks:
@@ -170,7 +170,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - SUPPORT_EMAIL=${SUPPORT_EMAIL}
       - FRONTEND_URL=${FRONTEND_URL}
       - MAIL_HOST=${MAIL_HOST:-sandbox.smtp.mailtrap.io}
@@ -198,7 +198,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
@@ -222,7 +222,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - RABBITMQ_USER=${RABBITMQ_USER:-service-user}
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
-      - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m -XX:+ExitOnOutOfMemoryError
+      - JAVA_TOOL_OPTIONS=-Xms96m -Xmx192m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=96m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-${DB_PASSWORD}}
       - POSTGRES_USER=${POSTGRES_USER:-ETA_DBUser}
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
