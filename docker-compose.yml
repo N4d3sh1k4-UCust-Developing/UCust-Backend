@@ -36,7 +36,7 @@ services:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError
       - JWT_SECRET_ACCESS=${JWT_SECRET_ACCESS}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://api.ucust.n4d3sh1k4.site,https://adm.ucust.n4d3sh1k4.site,https://ucust.ru,https://www.ucust.ru}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://ucust.ru,https://www.ucust.ru,https://adm.ucust.n4d3sh1k4.site,https://svoadmin.ucust.ru}
       - PGADMIN_URI=http://pgadmin-ucust:80
       - RABBITMQ_ADMIN_URI=http://rabbitmq-ucust:15672
       - MINIO_ADMIN_URI=http://minio-ucust:9001
@@ -69,6 +69,7 @@ services:
       - DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL}
       - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
       - GEO_API_URL=${GEO_API_URL}
+      - APP_OAUTH2_REDIRECT_URI=${APP_OAUTH2_REDIRECT_URI:-https://api.ucust.ru/api/v0/login/oauth2/code/{registrationId}}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -133,7 +134,7 @@ services:
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
       - MINIO_ACCESS_KEY=${CONTENT_MINIO_ACCESS_KEY:-content-service-user}
       - MINIO_SECRET_KEY=${CONTENT_MINIO_SECRET_KEY:-ct-strong-pass}
-      - MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.n4d3sh1k4.site/s3/content-service}
+      - MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.ru/s3/content-service}
     networks:
       - ucust-net
     restart: unless-stopped

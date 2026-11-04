@@ -72,7 +72,8 @@
 
 | Переменная | Обяз. | Значение |
 |---|---|---|
-| `CORS_ALLOWED_ORIGINS` | нет | origin'ы через запятую **без пробелов**, напр. `https://ucust.ru,https://www.ucust.ru,https://adm.ucust.n4d3sh1k4.site`. Не задана → дефолт из compose/`application-prod.yml` |
+| `CORS_ALLOWED_ORIGINS` | нет | origin'ы через запятую **без пробелов**: `https://ucust.ru,https://www.ucust.ru,https://adm.ucust.n4d3sh1k4.site,https://svoadmin.ucust.ru`. Не задана → тот же список по умолчанию в compose и `application-prod.yml` |
+| `APP_OAUTH2_REDIRECT_URI` | нет | redirect URI для Яндекс/VK OAuth2: `https://api.ucust.ru/api/v0/login/oauth2/code/{registrationId}`. Должен быть зарегистрирован в консолях провайдеров. Не задан → дефолт из `security-service/application-prod.yml` |
 | `POSTGRES_USER` | нет | дефолт `ETA_DBUser`; должен совпадать с `POSTGRES_USER` в ops |
 | `RABBITMQ_USER` | нет | дефолт `service-user`; должен совпадать с `RABBITMQ_USER` в ops |
 | `MINIO_PUBLIC_BASE_URL` | нет | публичный URL бакета медиа: `https://api.ucust.n4d3sh1k4.site/s3/generative-orchestration`; должен быть доступен AI-контуру |
