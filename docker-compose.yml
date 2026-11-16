@@ -92,6 +92,7 @@ services:
       - SERVER_TAILSCALE_IP=${SERVER_TAILSCALE_IP}
       - MINIO_ACCESS_KEY=${USER_MINIO_ACCESS_KEY:-user-service-user}
       - MINIO_SECRET_KEY=${USER_MINIO_SECRET_KEY:-usr-strong-pass}
+      - USER_MINIO_PUBLIC_BASE_URL=${USER_MINIO_PUBLIC_BASE_URL:-https://api.ucust.n4d3sh1k4.site/s3/user-service/}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -134,7 +135,7 @@ services:
       - MINIO_ENDPOINT=${MINIO_ENDPOINT:-http://minio:9000}
       - MINIO_ACCESS_KEY=${CONTENT_MINIO_ACCESS_KEY:-content-service-user}
       - MINIO_SECRET_KEY=${CONTENT_MINIO_SECRET_KEY:-ct-strong-pass}
-      - MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.ru/s3/content-service}
+      - MINIO_PUBLIC_BASE_URL=${CONTENT_MINIO_PUBLIC_BASE_URL:-https://api.ucust.n4d3sh1k4.site/s3/content-service}
     networks:
       - ucust-net
     restart: unless-stopped
@@ -172,6 +173,9 @@ services:
       - RABBITMQ_PASS=${RABBITMQ_PASS:-servicepassword}
       - JAVA_TOOL_OPTIONS=-Xms64m -Xmx160m -Xss512k -XX:MaxMetaspaceSize=224m -XX:ReservedCodeCacheSize=64m --enable-native-access=ALL-UNNAMED -XX:+ExitOnOutOfMemoryError
       - SUPPORT_EMAIL=${SUPPORT_EMAIL}
+      # Постоянный URL из админки: content-service/brand/email-logo.png.
+      # Перезаписывается при загрузке нового логотипа, конфиг менять не нужно.
+      - EMAIL_LOGO_URL=${EMAIL_LOGO_URL:-https://i.imgur.com/huFpdnM.png}
       - FRONTEND_URL=${FRONTEND_URL}
       - MAIL_HOST=${MAIL_HOST:-sandbox.smtp.mailtrap.io}
       - MAIL_PORT=${MAIL_PORT:-587}
